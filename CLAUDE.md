@@ -36,6 +36,8 @@
 
 19. commit message 使用中文
 
+20. 各 Demo 的 README.md 只做入口导航（简介、快速开始、notebook 列表、前置要求），所有教学内容（概念讲解、代码示例、练习题、FAQ、扩展阅读）放在 notebook 中。
+
 ---
 
 ## 常用命令
