@@ -78,7 +78,7 @@ Demo 4: 综合应用 - 数据清洗管道
 
 **目录结构**：
 ```
-demo1_daft_basics/
+demo1_daft/
 ├── README.md                    # Demo 说明文档
 ├── requirements.txt             # 依赖包
 ├── notebooks/                   # Notebook 自包含，代码全部内联
@@ -145,12 +145,12 @@ result = df_agg.collect()
    - 自动扩缩容、故障排除
 
 **数据**：
-- 复用 Demo 1 产品数据集（`demo1_daft_basics/data/products.parquet`）
+- 复用 Demo 1 产品数据集（`demo1_daft/data/products.parquet`）
 - 性能测试时通过 `generate_data.py` 动态生成 100 万条数据
 
 **目录结构**：
 ```
-demo2_ray_kubernetes/
+demo2_ray/
 ├── README.md
 ├── requirements.txt
 ├── notebooks/
@@ -176,7 +176,7 @@ ray.init()
 daft.set_runner_ray()
 
 # 读取 Demo 1 产品数据（与 Native Runner 代码完全相同）
-df = daft.read_parquet("../../demo1_daft_basics/data/products.parquet")
+df = daft.read_parquet("../../demo1_daft/data/products.parquet")
 
 # 分布式数据处理
 result = (
@@ -264,7 +264,7 @@ spec:
 
 **目录结构**：
 ```
-demo3_lancedb_basics/
+demo3_lancedb/
 ├── README.md
 ├── requirements.txt
 ├── notebooks/
@@ -350,7 +350,7 @@ results = table.search(query_vector).limit(5).to_list()
 
 **目录结构**：
 ```
-demo4_integrated_pipeline/
+demo4_integrated/
 ├── README.md
 ├── requirements.txt
 ├── ARCHITECTURE.md              # 架构文档
@@ -527,27 +527,15 @@ hello_daft/
 ├── CONTRIBUTING.md              # 贡献指南
 ├── LICENSE
 │
-├── demo1_daft_basics/           # Demo 1
-├── demo2_ray_kubernetes/        # Demo 2
-├── demo3_lancedb_basics/        # Demo 3
-├── demo4_integrated_pipeline/   # Demo 4
+├── demo1_daft/                  # Demo 1
+├── demo2_ray/                   # Demo 2
+├── demo3_lancedb/               # Demo 3
+├── demo4_integrated/            # Demo 4
 │
-├── docs/                        # 共享文档
-│   ├── setup_guide.md           # 环境设置指南
-│   ├── troubleshooting.md       # 常见问题
-│   └── best_practices.md        # 最佳实践
-│
-├── shared/                      # 共享代码和工具
-│   ├── utils/
-│   │   ├── data_generator.py    # 数据生成工具
-│   │   └── k8s_helper.py        # K8s 辅助函数
-│   └── configs/
-│       └── common.yaml          # 通用配置
-│
-└── scripts/
-    ├── setup_env.sh             # 环境初始化
-    ├── install_k8s_tools.sh     # 安装 K8s 工具
-    └── cleanup_all.sh           # 清理所有资源
+└── docs/                        # 共享文档
+    ├── setup_guide.md           # 环境设置指南
+    ├── troubleshooting.md       # 常见问题
+    └── best_practices.md        # 最佳实践
 ```
 
 ## 6. 学习路径建议

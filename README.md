@@ -13,10 +13,10 @@
 
 | Demo | 主题 | 学习内容 | 难度 |
 |------|------|----------|------|
-| [Demo 1](./demo1_daft_basics/) | Daft 基础 | 分布式数据框架的使用 | ⭐ |
-| [Demo 2](./demo2_ray_kubernetes/) | Ray on K8s | 分布式计算和 K8s 部署 | ⭐⭐ |
-| [Demo 3](./demo3_lancedb_basics/) | LanceDB 基础 | 向量数据库和语义搜索 | ⭐⭐ |
-| [Demo 4](./demo4_integrated_pipeline/) | 综合应用 | 完整的数据清洗管道 | ⭐⭐⭐ |
+| [Demo 1](./demo1_daft/) | Daft 基础 | 分布式数据框架的使用 | ⭐ |
+| [Demo 2](./demo2_ray/) | Ray on K8s | 分布式计算和 K8s 部署 | ⭐⭐ |
+| [Demo 3](./demo3_lancedb/) | LanceDB 基础 | 向量数据库和语义搜索 | ⭐⭐ |
+| [Demo 4](./demo4_integrated/) | 综合应用 | 完整的数据清洗管道 | ⭐⭐⭐ |
 
 ## 🎯 适合人群
 
@@ -92,7 +92,7 @@ Demo 4: 综合应用
 
 **开始学习**：
 ```bash
-cd demo1_daft_basics
+cd demo1_daft
 jupyter notebook notebooks/01_introduction.ipynb
 ```
 
@@ -109,7 +109,7 @@ jupyter notebook notebooks/01_introduction.ipynb
 
 **开始学习**：
 ```bash
-cd demo2_ray_kubernetes
+cd demo2_ray
 jupyter notebook notebooks/01_ray_basics.ipynb
 ```
 
@@ -126,7 +126,7 @@ jupyter notebook notebooks/01_ray_basics.ipynb
 
 **开始学习**：
 ```bash
-cd demo3_lancedb_basics
+cd demo3_lancedb
 jupyter notebook notebooks/01_lancedb_introduction.ipynb
 ```
 
@@ -143,7 +143,7 @@ jupyter notebook notebooks/01_lancedb_introduction.ipynb
 
 **开始学习**：
 ```bash
-cd demo4_integrated_pipeline
+cd demo4_integrated
 jupyter notebook notebooks/01_pipeline_overview.ipynb
 ```
 
@@ -155,26 +155,26 @@ hello_daft/
 ├── DESIGN.md                    # 详细设计文档
 ├── requirements.txt             # Python 依赖
 │
-├── demo1_daft_basics/           # Demo 1: Daft 基础
+├── demo1_daft/                  # Demo 1: Daft 基础
 │   ├── README.md
 │   ├── notebooks/
 │   ├── src/
 │   └── data/
 │
-├── demo2_ray_kubernetes/        # Demo 2: Ray on K8s
+├── demo2_ray/                   # Demo 2: Ray on K8s
 │   ├── README.md
 │   ├── notebooks/
 │   ├── k8s/
 │   ├── src/
 │   └── scripts/
 │
-├── demo3_lancedb_basics/        # Demo 3: LanceDB
+├── demo3_lancedb/               # Demo 3: LanceDB
 │   ├── README.md
 │   ├── notebooks/
 │   ├── src/
 │   └── data/
 │
-├── demo4_integrated_pipeline/   # Demo 4: 综合应用
+├── demo4_integrated/            # Demo 4: 综合应用
 │   ├── README.md
 │   ├── ARCHITECTURE.md
 │   ├── notebooks/
@@ -182,14 +182,10 @@ hello_daft/
 │   ├── src/
 │   └── docker/
 │
-├── docs/                        # 共享文档
-│   ├── setup_guide.md
-│   ├── troubleshooting.md
-│   └── best_practices.md
-│
-└── shared/                      # 共享工具
-    ├── utils/
-    └── configs/
+└── docs/                        # 共享文档
+    ├── setup_guide.md
+    ├── troubleshooting.md
+    └── best_practices.md
 ```
 
 ## 💡 核心技术
@@ -241,7 +237,7 @@ hello_daft/
 
 生成自定义数据：
 ```bash
-cd demo1_daft_basics/data
+cd demo1_daft/data
 python generate_data.py --size 100000 --output products.csv
 ```
 
@@ -355,4 +351,4 @@ kubectl describe nodes
 
 **开始你的学习之旅吧！** 🚀
 
-从 [Demo 1: Daft 基础](./demo1_daft_basics/) 开始，或查看 [设计文档](./DESIGN.md) 了解更多细节。
+从 [Demo 1: Daft 基础](./demo1_daft/) 开始，或查看 [设计文档](./DESIGN.md) 了解更多细节。

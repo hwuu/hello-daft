@@ -152,7 +152,7 @@
 ### 1. 安装依赖
 
 ```bash
-cd demo4_integrated_pipeline
+cd demo4_integrated
 
 # 安装依赖
 pip install -r ../requirements.txt
@@ -540,9 +540,9 @@ df = daft.read_csv("data/raw/reviews_raw.csv").repartition(100)
 - [KubeRay 文档](https://docs.ray.io/en/latest/cluster/kubernetes/index.html)
 
 ### 相关教程
-- [Demo 1: Daft 基础](../demo1_daft_basics/) - Daft DataFrame 操作
-- [Demo 2: Ray on Kubernetes](../demo2_ray_kubernetes/) - Ray 分布式计算
-- [Demo 3: LanceDB 基础](../demo3_lancedb_basics/) - 向量数据库和语义搜索
+- [Demo 1: Daft 基础](../demo1_daft/) - Daft DataFrame 操作
+- [Demo 2: Ray on Kubernetes](../demo2_ray/) - Ray 分布式计算
+- [Demo 3: LanceDB 基础](../demo3_lancedb/) - 向量数据库和语义搜索
 
 ### 推荐阅读
 - 《Designing Data-Intensive Applications》

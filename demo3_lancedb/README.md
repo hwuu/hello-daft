@@ -61,7 +61,7 @@
 ### 1. 安装依赖
 
 ```bash
-cd demo3_lancedb_basics
+cd demo3_lancedb
 
 # 确保已安装基础依赖
 pip install -r ../requirements.txt
@@ -474,7 +474,7 @@ table.add([updated_record])
 
 完成本 Demo 后，继续学习：
 
-👉 [Demo 4: 综合应用 - 数据清洗管道](../demo4_integrated_pipeline/) - 整合所有技术构建完整系统
+👉 [Demo 4: 综合应用 - 数据清洗管道](../demo4_integrated/) - 整合所有技术构建完整系统
 
 ---
 

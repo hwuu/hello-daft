@@ -12,7 +12,7 @@
 
 ## 前置要求
 
-- 完成 [Demo 1: Daft 基础](../demo1_daft_basics/)
+- 完成 [Demo 1: Daft 基础](../demo1_daft/)
 - Python 3.10+
 - 至少 8GB 内存
 
@@ -28,14 +28,14 @@
 
 ### 数据
 
-本 Demo 复用 Demo 1 的产品数据集（`demo1_daft_basics/data/products.parquet`），性能测试时通过 `generate_data.py` 动态生成大数据集。
+本 Demo 复用 Demo 1 的产品数据集（`demo1_daft/data/products.parquet`），性能测试时通过 `generate_data.py` 动态生成大数据集。
 
 ## 快速开始
 
 ### 1. 安装依赖
 
 ```bash
-cd demo2_ray_kubernetes
+cd demo2_ray
 pip install -r requirements.txt
 ```
 
@@ -61,7 +61,7 @@ bash scripts/cleanup.sh
 ## 目录结构
 
 ```
-demo2_ray_kubernetes/
+demo2_ray/
 ├── README.md
 ├── requirements.txt
 ├── notebooks/
@@ -131,4 +131,4 @@ Daft 的 Runner 在一个 Python 进程中只能设置一次。如需切换，�
 
 完成本 Demo 后，继续学习：
 
-[Demo 3: LanceDB 基础](../demo3_lancedb_basics/) — 学习向量数据库和语义搜索
+[Demo 3: LanceDB 基础](../demo3_lancedb/) — 学习向量数据库和语义搜索

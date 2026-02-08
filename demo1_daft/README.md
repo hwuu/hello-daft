@@ -83,7 +83,7 @@ pip install -r requirements.txt
 ### 2. 生成示例数据
 
 ```bash
-cd demo1_daft_basics
+cd demo1_daft
 python data/generate_data.py
 ```
 
@@ -431,7 +431,7 @@ print(df.explain(show_all=True))
 
 完成本 Demo 后，继续学习：
 
-👉 [Demo 2: Ray on Kubernetes](../demo2_ray_kubernetes/) - 学习分布式计算和 K8s 部署
+👉 [Demo 2: Ray on Kubernetes](../demo2_ray/) - 学习分布式计算和 K8s 部署
 
 ---
 

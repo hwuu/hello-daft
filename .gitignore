@@ -6,9 +6,9 @@ dist/
 build/
 
 # 数据文件（由 generate_data.py 生成）
-demo1_daft_basics/data/products.csv
-demo1_daft_basics/data/products.parquet
-demo1_daft_basics/data/products.json
+demo1_daft/data/products.csv
+demo1_daft/data/products.parquet
+demo1_daft/data/products.json
 
 # Jupyter
 .ipynb_checkpoints/

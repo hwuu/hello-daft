@@ -44,7 +44,7 @@
 
 ```bash
 # 生成 demo1 测试数据（默认 10 万条，可用 --size 调整）
-python demo1_daft_basics/data/generate_data.py --size 1000 --output demo1_daft_basics/data
+python demo1_daft/data/generate_data.py --size 1000 --output demo1_daft/data
 
 # 清理缓存
 rm -rf .pytest_cache **/__pycache__
