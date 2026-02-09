@@ -38,6 +38,12 @@
 
 20. 各 Demo 的 README.md 只做入口导航（简介、快速开始、notebook 列表、前置要求），所有教学内容（概念讲解、代码示例、练习题、FAQ、扩展阅读）放在 notebook 中。
 
+21. Notebook 中所有 Python 函数（包括 Ray remote 函数、Actor 方法）必须添加类型注解。
+
+22. Daft UDF 统一使用 `@daft.func` + 类型注解，禁止使用已废弃的 `@daft.udf(return_dtype=...)`。
+
+23. Notebook 作为教学文档，每个代码 cell 前必须有 markdown cell 说明代码目的和关键概念。
+
 ---
 
 ## 常用命令
