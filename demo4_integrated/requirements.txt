@@ -1,0 +1,5 @@
+lancedb>=0.4.0
+getdaft>=0.7.2
+pyarrow
+openai
+pandas

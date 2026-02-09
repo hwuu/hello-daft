@@ -72,6 +72,10 @@ nbstripout --status
 - `fill_null()` 直接在 Expression 上调用
 - `with_columns({})` 支持字典形式批量添加/修改列
 - 无 `is_not_null()` 方法，使用 `not_null()` 替代
+- 无 `Expression.str` 命名空间，字符串方法直接在 Expression 上调用：`col("x").length()` 而非 `col("x").str.length()`
+- 字符串拼接用 `+` 运算符：`col("a") + lit(" ") + col("b")`，不支持 `str.concat()`
+- `distinct()` 参数用位置参数：`df.distinct("col")` 而非 `df.distinct(on="col")`
+- 聚合表达式（如 `.sum()`）不能在 `select()` 中使用，必须用 `agg()`
 - `is_null()` 返回 Bool 类型，不能直接 `.sum()`，需先 `.cast(daft.DataType.int64())` 再 `.sum()`
 - `column_names` 是属性不是方法，不要加括号
 - `over()` 需要传入 `Window` 对象，不能直接传 Expression，用法：`col("x").mean().over(Window().partition_by("y"))`
