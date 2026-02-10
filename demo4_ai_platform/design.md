@@ -68,9 +68,9 @@
 ### 2.1 核心分层
 
 ```
-+------------------------------------------------------------------+
++-------------------------------------------------------------------+
 |                        AI Platform                                |
-|  (RESTful API: FastAPI)                                          |
+|  (RESTful API: FastAPI)                                           |
 |  +------------------+  +------------------+  +-----------------+  |
 |  | Ingestion Task   |  | Training Task    |  | Inference       |  |
 |  | Manager          |  | Manager          |  | Service         |  |
@@ -79,13 +79,13 @@
 +-----------+----------------------+---------------------+----------+
             |                      |                     |
             v                      v                     v
-+------------------------------------------------------------------+
++-------------------------------------------------------------------+
 |                       Data Platform                               |
 |  +------------------+  +---------------------+  +---------------+ |
 |  | Daft             |  | Ray                 |  | LanceDB/Lance | |
 |  | (Compute Engine) |  | (Optional Runtime)  |  | (Storage)     | |
 |  +------------------+  +---------------------+  +---------------+ |
-+------------------------------------------------------------------+
++-------------------------------------------------------------------+
 ```
 
 用户通过 AI Platform 的 RESTful API 操作全部功能，不直接接触 Data Platform。
@@ -103,17 +103,17 @@
 最简部署，适合开发调试和小规模数据（如 MNIST）。
 
 ```
-+---------------------------+
-|  Single Machine           |
-|                           |
-|  FastAPI (1 process)      |
-|  +-----------------------+|
-|  | Task: sequential      ||
-|  | Daft: local runner    ||
-|  | Lance: local files    ||
-|  | Serving: in-process   ||
-|  +-----------------------+|
-+---------------------------+
++----------------------------+
+|  Single Machine            |
+|                            |
+|  FastAPI (1 process)       |
+|  +----------------------+  |
+|  | Task: sequential     |  |
+|  | Daft: local runner   |  |
+|  | Lance: local files   |  |
+|  | Serving: in-process  |  |
+|  +----------------------+  |
++----------------------------+
 ```
 
 - **计算**：Daft 本地执行（默认 runner），任务串行
@@ -200,50 +200,65 @@ Ray 集群部署在 K8s 上，存储切换到共享对象存储。
 
 ### 2.3 可定制性设计
 
-平台不绑定特定数据集或模型，通过插件机制支持任意任务类型：
+平台不绑定特定数据集或模型。Ingestion 和 Training 采用统一的**脚本模式**：平台负责调度和存储，用户脚本负责业务逻辑。
 
-**Ingestion Task 的可定制性：**
+**Ingestion Task — 用户提供清洗脚本：**
 
-```python
-# 用户提供 pipeline 定义，每个 step 是一个注册过的处理函数
+```
 POST /api/v1/ingestion-tasks
 {
-    "pipeline": [
-        {"step": "read_csv", "params": {"delimiter": ","}},
-        {"step": "drop_nulls", "params": {"columns": ["text"]}},
-        {"step": "normalize_text", "params": {"lowercase": true}}
-    ]
+    "name": "mnist_ingestion",
+    "source_path": "/data/raw/mnist/",
+    "script": "pipelines/mnist_clean.py",
+    "params": {"normalize": true, "flatten": true},
+    "output_dataset": "mnist_clean"
 }
 ```
 
-内置 step 示例：`read_csv`、`read_images`、`drop_nulls`、`normalize`、`filter`、`deduplicate`。用户也可以注册自定义 step。
-
-**Training Task 的可定制性：**
+清洗脚本需要遵循接口约定：
 
 ```python
-# 用户指定训练脚本，平台只负责数据读取和模型存储
+# pipelines/mnist_clean.py
+def run(input_path: str, output_path: str, params: dict) -> dict:
+    """
+    Args:
+        input_path: 原始数据路径
+        output_path: 输出 Lance 路径
+        params: 用户自定义参数
+    Returns:
+        stats: {"total_records": 70000, ...}
+    """
+```
+
+**Training Task — 用户提供训练脚本：**
+
+```
 POST /api/v1/training-tasks
 {
-    "training_code": "training/my_custom_model.py",  # 任意训练脚本
-    "hyperparams": { ... },                           # 任意超参数
-    "dataset": "my_dataset"                           # 数据湖中的数据集
+    "name": "mnist_cnn_v1",
+    "dataset": "mnist_clean",
+    "script": "training/mnist_cnn.py",
+    "params": {"epochs": 10, "learning_rate": 0.001, "batch_size": 64},
+    "output_model": "mnist_cnn_v1"
 }
 ```
 
-训练脚本需要遵循一个简单的接口约定：
+训练脚本需要遵循接口约定：
 
 ```python
-# training/my_custom_model.py 需要实现：
-def train(data_path: str, hyperparams: dict, output_path: str) -> dict:
+# training/mnist_cnn.py
+def run(data_path: str, output_path: str, params: dict) -> dict:
     """
     Args:
         data_path: Lance 数据集路径
-        hyperparams: 用户定义的超参数
         output_path: 模型输出路径
+        params: 用户定义的超参数
     Returns:
         metrics: {"accuracy": 0.98, "loss": 0.03, ...}
     """
 ```
+
+两种任务的接口完全一致：`run(input, output, params) → stats/metrics`。
 
 ## 3. Data Platform
 
@@ -282,18 +297,38 @@ lance_storage/
 
 ### 3.3 对外接口
 
-Data Platform 向 AI Platform 暴露以下接口（Python 函数，非 HTTP）：
+Data Platform 作为独立微服务，通过 HTTP API 对外提供能力。数据本身不走 HTTP，而是通过共享存储（Lance 文件）交换：
 
-```python
-# storage.py
-def read_dataset(path: str) -> daft.DataFrame
-def write_dataset(path: str, data: daft.DataFrame) -> None
-def list_datasets(prefix: str) -> list[str]
-def delete_dataset(path: str) -> None
+```
+AI Platform                     Data Platform
+     |                               |
+     |  POST /compute/submit         |
+     |  {"script": "clean.py",       |
+     |   "input": "s3://.../raw",    |
+     |   "output": "s3://.../clean"} |
+     +------------------------------>|
+     |                               |  Daft on Ray 执行
+     |  200 {"task_id": "..."}       |  读 Lance → 处理 → 写 Lance
+     |<------------------------------+
+     |                               |
+     |  两边都能直接读 Lance 文件     |
+     |  (共享存储，不经过 HTTP)       |
+```
 
-# compute.py
-def run_pipeline(df: daft.DataFrame, steps: list[PipelineStep]) -> daft.DataFrame
-def submit_ray_task(fn: Callable, *args) -> ray.ObjectRef
+#### 存储 API
+
+```
+GET    /api/v1/storage/datasets              # 列出数据湖中的数据集
+GET    /api/v1/storage/datasets/{id}         # 查看数据集详情和 schema
+DELETE /api/v1/storage/datasets/{id}         # 删除数据集
+```
+
+#### 计算 API
+
+```
+POST   /api/v1/compute/submit               # 提交计算任务（执行用户脚本）
+GET    /api/v1/compute/{id}                  # 查询任务状态
+POST   /api/v1/compute/{id}/cancel           # 取消任务
 ```
 
 ## 4. AI Platform
@@ -304,8 +339,8 @@ def submit_ray_task(fn: Callable, *args) -> ray.ObjectRef
 
 | 模块 | 职责 |
 |------|------|
-| **Ingestion Task Manager** | 定义和执行数据入库任务（数据源 → 清洗 pipeline → 数据湖） |
-| **Training Task Manager** | 定义和执行训练任务（数据湖 → 训练代码 → 模型 → 数据湖） |
+| **Ingestion Task Manager** | 定义和执行数据入库任务（数据源 → 用户脚本 → 数据湖） |
+| **Training Task Manager** | 定义和执行训练任务（数据湖 → 用户脚本 → 模型 → 数据湖） |
 | **Inference Service** | 加载模型，提供推理 API |
 
 ### 4.2 RESTful API
@@ -353,15 +388,9 @@ def submit_ray_task(fn: Callable, *args) -> ray.ObjectRef
 POST /api/v1/ingestion-tasks
 {
     "name": "mnist_ingestion",
-    "source": {
-        "type": "local",
-        "path": "/data/raw/mnist/"
-    },
-    "pipeline": [
-        {"step": "read_images", "params": {"format": "idx"}},
-        {"step": "normalize", "params": {"scale": 255.0}},
-        {"step": "validate", "params": {"check_labels": true, "num_classes": 10}}
-    ],
+    "source_path": "/data/raw/mnist/",
+    "script": "pipelines/mnist_clean.py",
+    "params": {"normalize": true, "flatten": true},
     "output_dataset": "mnist_clean"
 }
 ```
@@ -432,8 +461,8 @@ POST /api/v1/training-tasks
 {
     "name": "mnist_cnn_v1",
     "dataset": "mnist_clean",
-    "training_code": "training/mnist_cnn.py",
-    "hyperparams": {
+    "script": "training/mnist_cnn.py",
+    "params": {
         "epochs": 10,
         "learning_rate": 0.001,
         "batch_size": 64
@@ -565,17 +594,19 @@ Content-Type: application/json
 ### 5.1 交互方式
 
 ```
-AI Platform                    Data Platform
-     |                              |
-     |  "写入原始数据到 /data/raw"   |
-     +----------------------------->|  LanceDB.create_table()
-     |                              |
-     |  "读取清洗数据从 /data/clean" |
-     |<-----------------------------+  daft.read_lance()
-     |                              |
-     |  "写入模型到 /models/v1"      |
-     +----------------------------->|  LanceDB.create_table()
-     |                              |
+AI Platform                     Data Platform
+     |                               |
+     |  POST /compute/submit         |
+     |  {"script": "clean.py",       |
+     |   "input": "s3://.../raw",    |
+     |   "output": "s3://.../clean"} |
+     +------------------------------>|  执行用户脚本（Daft on Ray）
+     |                               |
+     |  GET /compute/{id}            |
+     |<------------------------------+  {"status": "completed"}
+     |                               |
+     |  两边都能直接读 Lance 文件     |
+     |  (共享存储，不经过 HTTP)       |
 ```
 
 AI Platform 只看到 Lance 文件路径，不关心底层是本地磁盘还是 S3。
@@ -586,10 +617,9 @@ AI Platform 只看到 Lance 文件路径，不关心底层是本地磁盘还是 
 
 | AI Platform 看到的 | Data Platform 内部实现 |
 |---|---|
-| `read_dataset(path)` → DataFrame | `daft.read_lance(path)` on Ray |
-| `write_dataset(path, data)` | `df.write_lance(path)` |
-| `submit_compute(fn, data)` | Ray remote task |
-| Lance 文件路径 | 本地 / S3 / MinIO |
+| `POST /compute/submit` | Daft on Ray 执行用户脚本 |
+| `GET /storage/datasets` | 扫描 Lance 文件目录 |
+| Lance 文件路径（共享存储） | 本地 / S3 / MinIO |
 
 **Data Platform 不关心 AI 业务逻辑：**
 
@@ -602,8 +632,8 @@ AI Platform 只看到 Lance 文件路径，不关心底层是本地磁盘还是 
 
 ### 5.3 可替换性
 
-- **替换 Data Platform 存储**（如 Lance → Parquet + Milvus）：AI Platform 只需改 `read_dataset` / `write_dataset` 的实现
-- **替换 Data Platform 计算**（如 Daft → Spark）：AI Platform 代码不变
+- **替换 Data Platform 存储**（如 Lance → Parquet + Milvus）：AI Platform 不受影响，Data Platform 内部改实现即可
+- **替换 Data Platform 计算**（如 Daft → Spark）：AI Platform 代码不变，只要 Data Platform API 不变
 - **替换 AI Platform 训练框架**（如 PyTorch → TensorFlow）：Data Platform 不受影响
 
 ## 6. 核心任务流
@@ -612,32 +642,37 @@ AI Platform 只看到 Lance 文件路径，不关心底层是本地磁盘还是 
 
 ```
 +-------------+     +------------------+     +------------------+
-| Raw Data    |     | Daft Pipeline    |     | LanceDB          |
-| (MNIST zip) | --> | (Clean+Transform | --> | (lance_storage/  |
-|             |     |  on Ray)         |     |  datasets/)      |
+| Raw Data    |     | User Script      |     | LanceDB          |
+| (MNIST zip) | --> | (on Daft/Ray)    | --> | (lance_storage/  |
+|             |     |                  |     |  datasets/)      |
 +-------------+     +------------------+     +------------------+
 ```
 
-AI Platform 定义任务，Data Platform 执行：
+AI Platform 提交任务，Data Platform 执行用户脚本：
 
 ```python
-# AI Platform 侧：定义清洗 pipeline
-task = IngestionTask(
-    name="mnist_ingestion",
-    source_path="/data/raw/mnist/",
-    pipeline=[
-        ("read", {"format": "image_folder"}),
-        ("normalize", {"scale": 255.0}),
-        ("validate", {"check_labels": True}),
-    ],
-    output_path="lance_storage/datasets/mnist_clean.lance",
-)
+# pipelines/mnist_clean.py — 用户编写
+def run(input_path: str, output_path: str, params: dict) -> dict:
+    import daft
+    from daft import col
 
-# Data Platform 侧：执行
-df = daft.read_parquet(task.source_path)
-for step_name, step_params in task.pipeline:
-    df = apply_step(df, step_name, step_params)
-df.write_lance(task.output_path, mode="overwrite")
+    # 读取 IDX 格式的 MNIST 数据
+    df = load_mnist_idx(input_path)
+
+    # 归一化像素值到 [0, 1]
+    if params.get("normalize"):
+        df = df.with_column("image", col("image") / 255.0)
+
+    # 验证标签范围
+    df = df.where(col("label").between(0, 9))
+
+    # 添加 train/test 拆分
+    df = df.with_column("split", assign_split(col("index"), test_ratio=0.14))
+
+    # 写入数据湖
+    df.write_lance(output_path, mode="overwrite")
+
+    return {"total_records": df.count_rows()}
 ```
 
 MNIST 的具体清洗步骤：
@@ -651,33 +686,33 @@ MNIST 的具体清洗步骤：
 
 ```
 +------------------+     +------------------+     +------------------+
-| LanceDB          |     | PyTorch Training |     | LanceDB          |
-| (datasets/)      | --> | (on CPU)         | --> | (models/)        |
+| LanceDB          |     | User Script      |     | LanceDB          |
+| (datasets/)      | --> | (PyTorch on CPU) | --> | (models/)        |
 +------------------+     +------------------+     +------------------+
 ```
 
-Data Platform 提供数据，AI Platform 执行训练：
+AI Platform 提交任务，Data Platform 执行用户脚本：
 
 ```python
-# 从数据湖读取训练数据（Data Platform）
-df = daft.read_lance(task.dataset_path)
-train_data = df.where(col("split") == "train").to_pandas()
-test_data = df.where(col("split") == "test").to_pandas()
+# training/mnist_cnn.py — 用户编写
+def run(data_path: str, output_path: str, params: dict) -> dict:
+    import daft
+    from daft import col
 
-# 训练模型（AI Platform，PyTorch）
-model = MnistCNN()
-train_model(model, train_data, task.hyperparams)
-metrics = evaluate_model(model, test_data)
+    # 从数据湖读取训练数据
+    df = daft.read_lance(data_path)
+    train_data = df.where(col("split") == "train").to_pandas()
+    test_data = df.where(col("split") == "test").to_pandas()
 
-# 将模型权重 + 元数据写入数据湖（Data Platform）
-model_record = {
-    "name": task.name,
-    "weights": serialize(model.state_dict()),
-    "hyperparams": json.dumps(task.hyperparams),
-    "metrics": json.dumps(metrics),
-    "created_at": datetime.now().isoformat(),
-}
-db.create_table(task.name, [model_record], mode="overwrite")
+    # 训练模型（PyTorch）
+    model = MnistCNN()
+    train_model(model, train_data, params)
+    metrics = evaluate_model(model, test_data)
+
+    # 将模型权重 + 元数据写入数据湖
+    save_model(model, metrics, params, output_path)
+
+    return {"accuracy": metrics["accuracy"], "loss": metrics["loss"]}
 ```
 
 ### 6.3 推理服务
@@ -723,38 +758,41 @@ demo4_ai_platform/
 ├── design.md                    # 本文档
 ├── README.md
 ├── requirements.txt
-├── lance_storage/               # 数据湖根目录
+├── lance_storage/               # 数据湖根目录（共享存储）
 │   ├── datasets/
 │   └── models/
-├── data_platform/               # 数据平台层
+├── data_platform/               # 数据平台（独立微服务）
 │   ├── __init__.py
+│   ├── app.py                   # FastAPI 主应用（存储 + 计算 API）
 │   ├── storage.py               # Lance 读写封装
 │   └── compute.py               # Daft + Ray 计算封装
-├── ai_platform/                 # AI 平台层
+├── ai_platform/                 # AI 平台（独立微服务）
 │   ├── __init__.py
-│   ├── app.py                   # FastAPI 主应用
+│   ├── app.py                   # FastAPI 主应用（任务 + 推理 API）
 │   ├── ingestion.py             # 数据入库任务管理
 │   ├── training.py              # 模型训练任务管理
 │   └── serving.py               # 推理服务管理
-├── pipelines/                   # 清洗 pipeline 定义
-│   └── mnist.py
-├── training/                    # 训练脚本
-│   └── mnist_cnn.py
+├── scripts/                     # 用户脚本（清洗 + 训练）
+│   ├── pipelines/
+│   │   └── mnist_clean.py       # MNIST 清洗脚本
+│   └── training/
+│       └── mnist_cnn.py         # MNIST CNN 训练脚本
 └── tests/
     └── unit/
 ```
 
 ### 7.2 实现步骤
 
-1. `data_platform/storage.py` — 封装 Lance 读写（`read_dataset` / `write_dataset` / `list_datasets`）
-2. `data_platform/compute.py` — 封装 Daft 计算（`run_pipeline` / `run_on_ray`）
-3. `pipelines/mnist.py` — MNIST 清洗 pipeline（读取 IDX 格式、归一化、验证标签）
-4. `training/mnist_cnn.py` — PyTorch CNN 模型定义和训练逻辑
-5. `ai_platform/ingestion.py` — 数据入库任务管理
-6. `ai_platform/training.py` — 训练任务管理
-7. `ai_platform/serving.py` — 推理服务管理
-8. `ai_platform/app.py` — FastAPI 主应用，注册所有路由
-9. 单元测试
+1. `data_platform/storage.py` — Lance 读写封装（列出、查看 schema、删除）
+2. `data_platform/compute.py` — Daft 计算封装（执行用户脚本、管理 Ray runner）
+3. `data_platform/app.py` — Data Platform HTTP API（存储 + 计算路由）
+4. `scripts/pipelines/mnist_clean.py` — MNIST 清洗脚本（实现 `run()` 接口）
+5. `scripts/training/mnist_cnn.py` — PyTorch CNN 训练脚本（实现 `run()` 接口）
+6. `ai_platform/ingestion.py` — 数据入库任务管理（调用 Data Platform API）
+7. `ai_platform/training.py` — 训练任务管理（调用 Data Platform API）
+8. `ai_platform/serving.py` — 推理服务管理
+9. `ai_platform/app.py` — AI Platform HTTP API（任务 + 推理路由）
+10. 单元测试
 
 ### 7.3 技术选型
 
