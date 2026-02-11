@@ -210,7 +210,7 @@ POST /api/v1/tasks
 {
     "name": "mnist_ingestion",
     "input": "/data/raw/mnist/",
-    "script": "pipelines/mnist_clean.py",
+    "script": "mnist/mnist_clean.py",
     "params": {"normalize": true, "flatten": true},
     "output": "mnist_clean"
 }
@@ -219,7 +219,7 @@ POST /api/v1/tasks
 清洗脚本需要遵循接口约定：
 
 ```python
-# pipelines/mnist_clean.py
+# mnist/mnist_clean.py
 def run(input_path: str, output_path: str, params: dict) -> dict:
     """
     Args:
@@ -238,7 +238,7 @@ POST /api/v1/tasks
 {
     "name": "mnist_cnn_v1",
     "input": "mnist_clean",
-    "script": "training/mnist_cnn.py",
+    "script": "mnist/mnist_cnn.py",
     "params": {"epochs": 10, "learning_rate": 0.001, "batch_size": 64, "device": "cpu"},
     "output": "mnist_cnn_v1"
 }
@@ -247,7 +247,7 @@ POST /api/v1/tasks
 训练脚本需要遵循接口约定：
 
 ```python
-# training/mnist_cnn.py
+# mnist/mnist_cnn.py
 def run(input_path: str, output_path: str, params: dict) -> dict:
     """
     Args:
@@ -266,7 +266,7 @@ POST /api/v1/tasks
 {
     "name": "mnist_serve",
     "input": "lance_storage/models/mnist_cnn_v1.lance",
-    "script": "scripts/serving/mnist_serve.py",
+    "script": "mnist/mnist_serve.py",
     "output": "",
     "params": {"device": "cpu", "port": 8080}
 }
@@ -275,7 +275,7 @@ POST /api/v1/tasks
 推理脚本需要遵循接口约定：
 
 ```python
-# serving/mnist_serve.py
+# mnist/mnist_serve.py
 def run(input_path: str, output_path: str, params: dict) -> dict:
     """
     Args:
@@ -367,7 +367,7 @@ Orchestrator                         Executor
 ```
 POST /api/v1/tasks
 {
-    "script": "pipelines/mnist_clean.py",
+    "script": "mnist/mnist_clean.py",
     "input": "/data/raw/mnist/",
     "output": "lance_storage/datasets/mnist_clean.lance",
     "params": {"normalize": true, "flatten": true}
@@ -486,7 +486,7 @@ POST /api/v1/tasks
 {
     "name": "mnist_ingestion",
     "input": "/data/raw/mnist/",
-    "script": "pipelines/mnist_clean.py",
+    "script": "mnist/mnist_clean.py",
     "params": {"normalize": true, "flatten": true},
     "output": "mnist_clean"
 }
@@ -551,7 +551,7 @@ POST /api/v1/tasks
 {
     "name": "mnist_cnn_v1",
     "input": "mnist_clean",
-    "script": "training/mnist_cnn.py",
+    "script": "mnist/mnist_cnn.py",
     "params": {
         "epochs": 10,
         "learning_rate": 0.001,
@@ -600,7 +600,7 @@ POST /api/v1/tasks
 {
     "name": "mnist_serve",
     "input": "lance_storage/models/mnist_cnn_v1.lance",
-    "script": "scripts/serving/mnist_serve.py",
+    "script": "mnist/mnist_serve.py",
     "output": "",
     "params": {"device": "cpu", "port": 8080}
 }
@@ -732,7 +732,7 @@ Orchestrator 通过 Executor 的 HTTP API 交互（见 [3.2 RESTful API](#32-res
 Orchestrator 提交任务，Executor 执行用户脚本：
 
 ```python
-# pipelines/mnist_clean.py — 用户编写
+# mnist/mnist_clean.py — 用户编写
 def run(input_path: str, output_path: str, params: dict) -> dict:
     import daft
     from daft import col
@@ -775,7 +775,7 @@ MNIST 的具体清洗步骤：
 Orchestrator 提交任务，Executor 执行用户脚本：
 
 ```python
-# training/mnist_cnn.py — 用户编写
+# mnist/mnist_cnn.py — 用户编写
 def run(input_path: str, output_path: str, params: dict) -> dict:
     import daft
     from daft import col
@@ -808,7 +808,7 @@ def run(input_path: str, output_path: str, params: dict) -> dict:
 推理服务由用户脚本实现，平台只负责启动脚本。用户脚本从数据湖加载模型，启动 FastAPI 子服务：
 
 ```python
-# scripts/serving/mnist_serve.py — 用户编写
+# mnist/mnist_serve.py — 用户编写
 def run(input_path: str, output_path: str, params: dict) -> dict:
     import daft, torch, uvicorn
     from fastapi import FastAPI
@@ -864,13 +864,11 @@ demo4_ai_platform/
 │   ├── __init__.py
 │   ├── app.py                   # FastAPI 主应用（任务 + 代理 API）
 │   └── tasks.py                 # 统一任务管理
-├── scripts/                     # 用户脚本
-│   ├── pipelines/
-│   │   └── mnist_clean.py       # MNIST 清洗脚本
-│   ├── training/
-│   │   └── mnist_cnn.py         # MNIST CNN 训练脚本
-│   └── serving/
-│       └── mnist_serve.py       # MNIST 推理服务脚本
+├── mnist/                       # 用户脚本 + Web Demo
+│   ├── mnist_clean.py           # MNIST 清洗脚本
+│   ├── mnist_cnn.py             # MNIST CNN 训练脚本
+│   ├── mnist_serve.py           # MNIST 推理服务脚本
+│   └── index.html               # 手写数字识别 Web Demo
 └── tests/
     └── unit/
 ```
@@ -882,9 +880,9 @@ demo4_ai_platform/
 1. `executor/storage.py` — Lance 读写封装（列出、查看 schema、删除）
 2. `executor/runner.py` — 脚本执行器（加载用户脚本、调用 `run()`、管理 Daft/Ray runner）
 3. `executor/app.py` — Executor HTTP API（存储 + 任务路由）
-4. `scripts/pipelines/mnist_clean.py` — MNIST 清洗脚本（实现 `run()` 接口）
-5. `scripts/training/mnist_cnn.py` — PyTorch CNN 训练脚本（实现 `run()` 接口）
-6. `scripts/serving/mnist_serve.py` — 推理服务脚本（实现 `run()` 接口，启动 FastAPI 子服务）
+4. `mnist/mnist_clean.py` — MNIST 清洗脚本（实现 `run()` 接口）
+5. `mnist/mnist_cnn.py` — PyTorch CNN 训练脚本（实现 `run()` 接口）
+6. `mnist/mnist_serve.py` — 推理服务脚本（实现 `run()` 接口，启动 FastAPI 子服务）
 7. `orchestrator/tasks.py` — 统一任务管理（调用 Executor API）
 8. `orchestrator/app.py` — Orchestrator HTTP API（任务 + 代理路由）
 9. `config.yaml` — 配置文件

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class MnistCNN(nn.Module):
     """MNIST CNN 模型结构。
 
-    必须与 scripts/training/mnist_cnn.py 中的 MnistCNN 保持一致。
+    必须与 mnist/mnist_cnn.py 中的 MnistCNN 保持一致。
     结构: Conv(1->16) -> Pool -> Conv(16->32) -> Pool -> FC(1568->128) -> FC(128->10)
     """
 

@@ -42,7 +42,7 @@ class TestTaskManager:
             result = manager.create({
                 "name": "mnist_ingestion",
                 "input": "download",
-                "script": "scripts/pipelines/mnist_clean.py",
+                "script": "mnist/mnist_clean.py",
                 "output": "lance_storage/datasets/mnist_clean.lance",
                 "params": {"normalize": True},
             })
@@ -64,7 +64,7 @@ class TestTaskManager:
             result = manager.create({
                 "name": "mnist_serve",
                 "input": "lance_storage/models/mnist_cnn_v1.lance",
-                "script": "scripts/serving/mnist_serve.py",
+                "script": "mnist/mnist_serve.py",
                 "output": "",
                 "params": {"device": "cpu", "port": 8080},
             })
