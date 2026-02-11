@@ -1,7 +1,6 @@
 """Orchestrator HTTP API: unified task management + proxy to Executor."""
 
 from contextlib import asynccontextmanager
-from typing import Any
 
 import httpx
 import yaml
@@ -103,8 +102,11 @@ def create_app() -> FastAPI:
             raise HTTPException(404, {"code": "TASK_NOT_FOUND", "message": f"Task '{task_id}' not found or not running"})
         return {"status": "cancelled"}
 
+    class PredictRequest(BaseModel):
+        image: list[float]  # 784 floats (28x28 normalized pixel values)
+
     @app.post("/api/v1/tasks/{task_id}/predict")
-    def predict(task_id: str, body: dict[str, Any] = {}):
+    def predict(task_id: str, body: PredictRequest):
         task = _manager.get(task_id)
         if task is None:
             raise HTTPException(404, {"code": "TASK_NOT_FOUND", "message": f"Task '{task_id}' not found"})
@@ -112,8 +114,10 @@ def create_app() -> FastAPI:
             raise HTTPException(400, {"code": "INVALID_REQUEST", "message": "Only inference tasks support predict"})
         if task.get("status") != "running":
             raise HTTPException(400, {"code": "INVALID_REQUEST", "message": "Inference service is not running"})
-        # Placeholder: actual prediction logic will be implemented with model loading
-        raise HTTPException(501, {"code": "NOT_IMPLEMENTED", "message": "Predict endpoint not yet implemented"})
+        try:
+            return _manager.predict(task_id, body.image)
+        except ValueError as e:
+            raise HTTPException(500, {"code": "INFERENCE_ERROR", "message": str(e)})
 
     return app
 

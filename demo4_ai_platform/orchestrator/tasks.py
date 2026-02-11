@@ -1,11 +1,16 @@
 """Unified task management: ingestion / training / inference."""
 
+import io
+import json
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from threading import Lock
 
 import httpx
+import numpy as np
+import torch
+import torch.nn as nn
 
 
 class TaskType(str, Enum):
@@ -21,10 +26,37 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
+class _MnistCNN(nn.Module):
+    """Must match the architecture in scripts/training/mnist_cnn.py."""
+
+    def __init__(self):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 16, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(16, 32, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(32 * 7 * 7, 128),
+            nn.ReLU(),
+            nn.Linear(128, 10),
+        )
+
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
+
+
 class TaskManager:
     def __init__(self, executor_url: str):
         self.executor_url = executor_url.rstrip("/")
         self._tasks: dict[str, dict] = {}
+        self._models: dict[str, nn.Module] = {}  # task_id -> loaded model
         self._lock = Lock()
 
     def create(self, task_type: TaskType, payload: dict) -> dict:
@@ -138,12 +170,61 @@ class TaskManager:
             pass
 
     def _start_inference(self, task_id: str, payload: dict):
-        """Start inference service (placeholder — model loading happens here)."""
-        # For Level 1, inference runs in-process.
-        # Full implementation will load model from Lance and start a predict endpoint.
+        """Load model from Lance and prepare for inference."""
+        model_name = payload.get("model", "")
+        device = payload.get("device", "cpu")
         port = payload.get("port", 8080)
-        with self._lock:
-            self._tasks[task_id]["endpoint"] = f"http://localhost:{port}"
+
+        try:
+            # Load model weights from Executor
+            resp = httpx.get(f"{self.executor_url}/api/v1/models/{model_name}")
+            resp.raise_for_status()
+            model_info = resp.json()
+            model_path = model_info["path"]
+
+            # Read weights from Lance
+            import daft
+            df = daft.read_lance(model_path)
+            pdf = df.to_pandas()
+            weights_bytes = pdf["weights"].iloc[0]
+
+            # Load into PyTorch model
+            model = _MnistCNN()
+            buf = io.BytesIO(weights_bytes)
+            model.load_state_dict(torch.load(buf, map_location=device, weights_only=True))
+            model.eval()
+
+            with self._lock:
+                self._models[task_id] = model
+                self._tasks[task_id]["endpoint"] = f"http://localhost:{port}"
+        except Exception as e:
+            with self._lock:
+                self._tasks[task_id]["status"] = TaskStatus.FAILED
+                self._tasks[task_id]["error"] = str(e)
+                self._tasks[task_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+
+    def predict(self, task_id: str, image_data: list[float]) -> dict:
+        """Run inference on a loaded model.
+
+        Args:
+            task_id: inference task ID
+            image_data: flat list of 784 floats (28x28 normalized pixel values)
+        Returns:
+            {"prediction": int, "confidence": float, "probabilities": list[float]}
+        """
+        model = self._models.get(task_id)
+        if model is None:
+            raise ValueError("Model not loaded")
+
+        tensor = torch.tensor(image_data, dtype=torch.float32).reshape(1, 1, 28, 28)
+        with torch.no_grad():
+            output = model(tensor)
+        probs = torch.softmax(output, dim=1)
+        return {
+            "prediction": probs.argmax().item(),
+            "confidence": probs.max().item(),
+            "probabilities": probs[0].tolist(),
+        }
 
     def _public_view(self, task: dict) -> dict:
         """Return task dict without internal fields."""
