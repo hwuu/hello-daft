@@ -161,20 +161,14 @@
             border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 13px;
-            width: 200px;
-        }
-        .config select {
-            padding: 4px 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 13px;
+            width: 240px;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>MNIST 手写数字识别</h1>
-        <p class="subtitle">在画布上写一个数字（0-9），点击"识别"调用 AI Platform 推理 API</p>
+        <p class="subtitle">在画布上写一个数字（0-9），点击"识别"调用推理服务</p>
 
         <div class="main">
             <div class="canvas-area">
@@ -199,12 +193,8 @@
         </div>
 
         <div class="config">
-            <label>API 地址:</label>
-            <input id="apiUrl" value="http://localhost:8000/api/v1" onchange="checkService()">
-            <label>推理任务:</label>
-            <select id="taskSelect" onchange="selectTask()">
-                <option value="">加载中...</option>
-            </select>
+            <label>推理服务地址:</label>
+            <input id="inferenceUrl" value="http://localhost:8080" onchange="checkService()">
         </div>
     </div>
 
@@ -286,22 +276,15 @@
 
         // ========== API 调用 ==========
 
-        let currentTaskId = null;
-
         async function predict() {
-            if (!currentTaskId) {
-                alert("请先选择一个推理任务，或创建一个新的推理任务");
-                return;
-            }
-
             const btn = document.getElementById("predictBtn");
             btn.disabled = true;
             btn.textContent = "识别中...";
 
             try {
                 const image = getImageData();
-                const apiUrl = document.getElementById("apiUrl").value;
-                const resp = await fetch(`${apiUrl}/tasks/${currentTaskId}/predict`, {
+                const inferenceUrl = document.getElementById("inferenceUrl").value.replace(/\/+$/, "");
+                const resp = await fetch(`${inferenceUrl}/predict`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ image }),
@@ -354,51 +337,20 @@
         // ========== 服务状态检查 ==========
 
         async function checkService() {
-            const apiUrl = document.getElementById("apiUrl").value;
+            const inferenceUrl = document.getElementById("inferenceUrl").value.replace(/\/+$/, "");
             const dot = document.getElementById("statusDot");
             const text = document.getElementById("statusText");
 
             try {
-                // 检查服务是否可用
-                const resp = await fetch(`${apiUrl}/tasks?type=inference`);
+                const resp = await fetch(`${inferenceUrl}/health`);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-                const tasks = await resp.json();
-                const runningTasks = tasks.filter(t => t.status === "running");
-
-                // 填充任务下拉框
-                const select = document.getElementById("taskSelect");
-                select.innerHTML = "";
-
-                if (runningTasks.length > 0) {
-                    runningTasks.forEach(t => {
-                        const opt = document.createElement("option");
-                        opt.value = t.id;
-                        opt.textContent = `${t.name} (${t.id})`;
-                        select.appendChild(opt);
-                    });
-                    currentTaskId = runningTasks[0].id;
-                    dot.className = "status-dot ok";
-                    text.textContent = `服务就绪，${runningTasks.length} 个推理任务运行中`;
-                } else {
-                    select.innerHTML = '<option value="">无运行中的推理任务</option>';
-                    currentTaskId = null;
-                    dot.className = "status-dot err";
-                    text.textContent = "没有运行中的推理任务。请先通过 API 或 Notebook 创建一个 type=inference 任务。";
-                }
+                dot.className = "status-dot ok";
+                text.textContent = `推理服务就绪: ${inferenceUrl}`;
             } catch (e) {
-                const dot = document.getElementById("statusDot");
-                const text = document.getElementById("statusText");
                 dot.className = "status-dot err";
-                text.textContent = `无法连接服务: ${e.message}`;
-                document.getElementById("taskSelect").innerHTML =
-                    '<option value="">连接失败</option>';
-                currentTaskId = null;
+                text.textContent = `无法连接推理服务: ${e.message}。请先启动推理任务。`;
             }
-        }
-
-        function selectTask() {
-            currentTaskId = document.getElementById("taskSelect").value || null;
         }
 
         // 页面加载时检查服务

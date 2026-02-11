@@ -41,7 +41,14 @@
       "Bash(git mv demo2_ray_kubernetes demo2_ray)",
       "Bash(git mv:*)",
       "Bash(git rm:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(du:*)",
+      "Bash(ls:*)",
+      "WebFetch(domain:developer.volcengine.com)",
+      "Bash(git status:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(pkill:*)",
+      "Bash(python -m pytest:*)"
     ]
   }
 }

@@ -59,7 +59,7 @@
 将系统拆分为两个解耦的服务，统称 **AI Platform**：
 
 - **Executor**（执行器）：基于 Daft + Ray + LanceDB，负责数据湖存储和脚本执行
-- **Orchestrator**（编排器）：负责任务编排、代理查询、推理服务，是用户唯一入口
+- **Orchestrator**（编排器）：负责任务编排、代理查询，是用户唯一入口
 
 两者通过 **Lance 格式**作为契约层连接，互不依赖对方的实现细节。
 
@@ -74,7 +74,7 @@
 |  +----------------------------------------------------------------+  |
 |  |  Orchestrator (RESTful API: FastAPI)                           |  |
 |  |  +----------------------------------------------------------+  |  |
-|  |  | Task Manager (ingestion / training / inference)          |  |  |
+|  |  | Task Manager                                             |  |  |
 |  |  +----------------------------+-----------------------------+  |  |
 |  |                               |                                |  |
 |  +-------------------------------+--------------------------------+  |
@@ -93,7 +93,7 @@
 
 用户通过 Orchestrator 的 RESTful API 操作全部功能，不直接接触 Executor。
 
-任务（ingestion、training、inference）是高度可定制的——用户提供自己的脚本，平台只负责调度和存储（详见 [2.3 可定制性设计](#23-可定制性设计)）。
+任务是高度可定制的——用户提供自己的脚本，平台只负责调度和存储（详见 [2.3 可定制性设计](#23-可定制性设计)）。
 
 ### 2.2 部署级别
 
@@ -112,14 +112,14 @@
 |  | Task: sequential     |  |
 |  | Daft: local runner   |  |
 |  | Lance: local files   |  |
-|  | Serving: in-process  |  |
+|  | Serving: user script |  |
 |  +----------------------+  |
 +----------------------------+
 ```
 
 - **计算**：Daft 本地执行（默认 runner），任务串行
 - **存储**：Lance 文件在本地磁盘
-- **推理**：FastAPI 单进程，模型加载在同一进程内
+- **推理**：用户脚本启动 FastAPI 子服务
 - **任务调度**：内存中的状态机，同一时间只运行一个任务
 - **依赖**：不需要 Ray，不需要 K8s
 
@@ -201,14 +201,13 @@ Ray 集群部署在 K8s 上，存储切换到共享对象存储。
 
 ### 2.3 可定制性设计
 
-平台不绑定特定数据集或模型。Ingestion 和 Training 采用统一的**脚本模式**：平台负责调度和存储，用户脚本负责业务逻辑。
+平台不绑定特定数据集或模型。所有任务采用统一的**脚本模式**：平台负责调度和存储，用户脚本负责业务逻辑。
 
-**type=ingestion — 用户提供清洗脚本：**
+**数据入库 — 用户提供清洗脚本：**
 
 ```
 POST /api/v1/tasks
 {
-    "type": "ingestion",
     "name": "mnist_ingestion",
     "input": "/data/raw/mnist/",
     "script": "pipelines/mnist_clean.py",
@@ -232,12 +231,11 @@ def run(input_path: str, output_path: str, params: dict) -> dict:
     """
 ```
 
-**type=training — 用户提供训练脚本：**
+**模型训练 — 用户提供训练脚本：**
 
 ```
 POST /api/v1/tasks
 {
-    "type": "training",
     "name": "mnist_cnn_v1",
     "input": "mnist_clean",
     "script": "training/mnist_cnn.py",
@@ -261,7 +259,35 @@ def run(input_path: str, output_path: str, params: dict) -> dict:
     """
 ```
 
-两种任务的接口完全一致：`run(input_path, output_path, params) → stats/metrics`。
+**推理服务 — 用户提供推理脚本：**
+
+```
+POST /api/v1/tasks
+{
+    "name": "mnist_serve",
+    "input": "lance_storage/models/mnist_cnn_v1.lance",
+    "script": "scripts/serving/mnist_serve.py",
+    "output": "",
+    "params": {"device": "cpu", "port": 8080}
+}
+```
+
+推理脚本需要遵循接口约定：
+
+```python
+# serving/mnist_serve.py
+def run(input_path: str, output_path: str, params: dict) -> dict:
+    """
+    Args:
+        input_path: Lance 模型文件路径
+        output_path: 未使用
+        params: 服务参数（port, device 等）
+    Returns:
+        不会正常返回（阻塞直到进程终止）
+    """
+```
+
+所有任务的接口完全一致：`run(input_path, output_path, params) → dict`。平台不区分批处理和服务，不关心脚本内部做什么。
 
 ## 3. Executor
 
@@ -409,13 +435,13 @@ lance_storage/
 
 ## 4. Orchestrator
 
-任务编排、代理查询、推理服务。用户唯一入口。
+任务编排、代理查询。用户唯一入口。
 
 ### 4.1 模块职责
 
 | 模块 | 职责 |
 |------|------|
-| **Task Manager** | 统一管理所有任务（ingestion / training / inference），调用 Executor API |
+| **Task Manager** | 统一管理所有任务，调用 Executor API |
 | **Proxy** | 代理 Executor 的 datasets / models 查询 |
 
 ### 4.2 RESTful API
@@ -435,20 +461,21 @@ lance_storage/
 │   └── DELETE /{id}             # 删除模型
 │
 └── tasks/                       # 统一任务管理
-    ├── GET    /                 # 列出所有任务（可按 ?type=ingestion 过滤）
-    ├── POST   /                 # 创建任务（type 区分 ingestion/training/inference）
+    ├── GET    /                 # 列出所有任务
+    ├── POST   /                 # 创建任务
     ├── GET    /{id}             # 获取任务状态和详情
-    ├── POST   /{id}/cancel      # 取消/停止任务
-    └── POST   /{id}/predict     # 调用推理（仅 type=inference）
+    └── POST   /{id}/cancel      # 取消/停止任务
 ```
 
-三种任务类型：
+所有任务统一接口：
 
-| type | 行为 | 请求字段 |
-|------|------|---------|
-| `ingestion` | 批处理：运行完自动 completed | `name`, `input`, `script`, `params`, `output` |
-| `training` | 批处理：运行完自动 completed | `name`, `input`, `script`, `params`, `output` |
-| `inference` | 常驻服务：一直 running 直到 cancel | `name`, `model`, `device`, `port` |
+| 字段 | 说明 |
+|------|------|
+| `name` | 任务名称 |
+| `input` | 输入路径 |
+| `script` | 用户脚本路径 |
+| `output` | 输出路径 |
+| `params` | 用户自定义参数（如 port, device 等） |
 
 #### 用户使用流程（MNIST 示例）
 
@@ -457,7 +484,6 @@ lance_storage/
 ```
 POST /api/v1/tasks
 {
-    "type": "ingestion",
     "name": "mnist_ingestion",
     "input": "/data/raw/mnist/",
     "script": "pipelines/mnist_clean.py",
@@ -470,7 +496,6 @@ POST /api/v1/tasks
 201 Created
 {
     "id": "task-001",
-    "type": "ingestion",
     "name": "mnist_ingestion",
     "status": "running",
     "created_at": "2026-02-10T10:00:00Z"
@@ -487,7 +512,6 @@ GET /api/v1/tasks/task-001
 200 OK
 {
     "id": "task-001",
-    "type": "ingestion",
     "name": "mnist_ingestion",
     "status": "completed",
     "created_at": "2026-02-10T10:00:00Z",
@@ -525,7 +549,6 @@ GET /api/v1/datasets/mnist_clean
 ```
 POST /api/v1/tasks
 {
-    "type": "training",
     "name": "mnist_cnn_v1",
     "input": "mnist_clean",
     "script": "training/mnist_cnn.py",
@@ -543,7 +566,6 @@ POST /api/v1/tasks
 201 Created
 {
     "id": "task-002",
-    "type": "training",
     "name": "mnist_cnn_v1",
     "status": "running",
     "created_at": "2026-02-10T10:05:00Z"
@@ -560,7 +582,6 @@ GET /api/v1/tasks/task-002
 200 OK
 {
     "id": "task-002",
-    "type": "training",
     "name": "mnist_cnn_v1",
     "status": "completed",
     "created_at": "2026-02-10T10:05:00Z",
@@ -577,11 +598,11 @@ GET /api/v1/tasks/task-002
 ```
 POST /api/v1/tasks
 {
-    "type": "inference",
-    "name": "mnist_predictor",
-    "model": "mnist_cnn_v1",
-    "device": "cpu",
-    "port": 8080
+    "name": "mnist_serve",
+    "input": "lance_storage/models/mnist_cnn_v1.lance",
+    "script": "scripts/serving/mnist_serve.py",
+    "output": "",
+    "params": {"device": "cpu", "port": 8080}
 }
 ```
 
@@ -589,18 +610,18 @@ POST /api/v1/tasks
 201 Created
 {
     "id": "task-003",
-    "type": "inference",
-    "name": "mnist_predictor",
+    "name": "mnist_serve",
     "status": "running",
-    "endpoint": "http://localhost:8080",
     "created_at": "2026-02-10T10:15:00Z"
 }
 ```
 
 **Step 7: 调用推理**
 
+推理服务由用户脚本启动的子服务提供，直接调用子服务端点：
+
 ```
-POST /api/v1/tasks/task-003/predict
+POST http://localhost:8080/predict
 Content-Type: application/json
 {
     "image": [0.0, 0.0, ..., 0.984, ..., 0.0]
@@ -620,7 +641,7 @@ Content-Type: application/json
 
 ### 4.3 任务状态机
 
-所有任务共享同一状态机。批处理任务（ingestion/training）运行完自动进入 completed；常驻任务（inference）保持 running 直到 cancel：
+所有任务共享同一状态机。脚本跑完就 completed，报错就 failed，cancel 就 cancelled：
 
 ```
 +----------+     submit    +-----------+     done      +-----------+
@@ -779,40 +800,46 @@ def run(input_path: str, output_path: str, params: dict) -> dict:
 
 ```
 +------------------+     +------------------+     +------------------+
-| Data Lake        |     | Model Loading    |     | API / Web        |
-| (models/)        | --> | (PyTorch)        | --> | (FastAPI)        |
+| Data Lake        |     | User Script      |     | API / Web        |
+| (models/)        | --> | (FastAPI subprocess) | --> | (localhost:port) |
 +------------------+     +------------------+     +------------------+
 ```
 
-从数据湖加载模型，在 Orchestrator 进程内提供推理：
+推理服务由用户脚本实现，平台只负责启动脚本。用户脚本从数据湖加载模型，启动 FastAPI 子服务：
 
 ```python
-# orchestrator/tasks.py — 加载模型并推理
-import daft, torch
+# scripts/serving/mnist_serve.py — 用户编写
+def run(input_path: str, output_path: str, params: dict) -> dict:
+    import daft, torch, uvicorn
+    from fastapi import FastAPI
 
-# 从数据湖读取模型权重
-df = daft.read_lance("lance_storage/models/mnist_cnn_v1.lance")
-pdf = df.to_pandas()
-weights_bytes = pdf["weights"].iloc[0]
+    # 从数据湖读取模型权重
+    df = daft.read_lance(input_path)
+    pdf = df.to_pandas()
+    weights_bytes = pdf["weights"].iloc[0]
 
-# 反序列化权重并加载到 PyTorch 模型
-model = MnistCNN()
-model.load_state_dict(torch.load(io.BytesIO(weights_bytes), weights_only=True))
-model.eval()
+    # 加载 PyTorch 模型
+    model = MnistCNN()
+    model.load_state_dict(torch.load(io.BytesIO(weights_bytes), weights_only=True))
+    model.eval()
 
-# 推理
-@app.post("/api/v1/tasks/{task_id}/predict")
-def predict(task_id: str, body: PredictRequest):
-    # body.image: 784 维浮点数组
-    tensor = torch.tensor(body.image).reshape(1, 1, 28, 28)
-    with torch.no_grad():
-        output = model(tensor)
-    probs = torch.softmax(output, dim=1)
-    return {
-        "prediction": probs.argmax().item(),
-        "confidence": probs.max().item(),
-        "probabilities": probs[0].tolist(),
-    }
+    # 启动 FastAPI 子服务
+    app = FastAPI()
+
+    @app.post("/predict")
+    def predict(body: PredictRequest):
+        tensor = torch.tensor(body.image).reshape(1, 1, 28, 28)
+        with torch.no_grad():
+            output = model(tensor)
+        probs = torch.softmax(output, dim=1)
+        return {
+            "prediction": probs.argmax().item(),
+            "confidence": probs.max().item(),
+            "probabilities": probs[0].tolist(),
+        }
+
+    # 阻塞运行，直到进程被 kill
+    uvicorn.run(app, host="0.0.0.0", port=params.get("port", 8080))
 ```
 
 ## 7. MNIST 实现规划
@@ -835,13 +862,15 @@ demo4_ai_platform/
 │   └── runner.py                # 脚本执行器（加载脚本、调用 run()、管理 Daft/Ray）
 ├── orchestrator/                # Orchestrator（独立微服务，用户入口）
 │   ├── __init__.py
-│   ├── app.py                   # FastAPI 主应用（任务 + 推理 API）
-│   └── tasks.py                 # 统一任务管理（ingestion/training/inference）
-├── scripts/                     # 用户脚本（清洗 + 训练）
+│   ├── app.py                   # FastAPI 主应用（任务 + 代理 API）
+│   └── tasks.py                 # 统一任务管理
+├── scripts/                     # 用户脚本
 │   ├── pipelines/
 │   │   └── mnist_clean.py       # MNIST 清洗脚本
-│   └── training/
-│       └── mnist_cnn.py         # MNIST CNN 训练脚本
+│   ├── training/
+│   │   └── mnist_cnn.py         # MNIST CNN 训练脚本
+│   └── serving/
+│       └── mnist_serve.py       # MNIST 推理服务脚本
 └── tests/
     └── unit/
 ```
@@ -855,12 +884,13 @@ demo4_ai_platform/
 3. `executor/app.py` — Executor HTTP API（存储 + 任务路由）
 4. `scripts/pipelines/mnist_clean.py` — MNIST 清洗脚本（实现 `run()` 接口）
 5. `scripts/training/mnist_cnn.py` — PyTorch CNN 训练脚本（实现 `run()` 接口）
-6. `orchestrator/tasks.py` — 统一任务管理（ingestion/training/inference，调用 Executor API）
-7. `orchestrator/app.py` — Orchestrator HTTP API（任务 + 代理路由）
-8. `config.yaml` — 配置文件
-9. 单元测试
+6. `scripts/serving/mnist_serve.py` — 推理服务脚本（实现 `run()` 接口，启动 FastAPI 子服务）
+7. `orchestrator/tasks.py` — 统一任务管理（调用 Executor API）
+8. `orchestrator/app.py` — Orchestrator HTTP API（任务 + 代理路由）
+9. `config.yaml` — 配置文件
+10. 单元测试
 
-> Orchestrator 的 `tasks.py` 统一处理三种任务类型。ingestion 和 training 的调用逻辑完全相同（向 Executor 提交脚本任务），inference 额外管理模型加载和 predict 端点。
+> Orchestrator 的 `tasks.py` 统一处理所有任务。所有任务的调用逻辑完全相同——向 Executor 提交脚本任务。推理服务由用户脚本自行启动子服务。
 
 ### 7.3 技术选型
 

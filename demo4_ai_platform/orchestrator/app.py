@@ -13,11 +13,11 @@ from contextlib import asynccontextmanager
 
 import httpx
 import yaml
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .tasks import TaskManager, TaskType
+from .tasks import TaskManager
 
 logger = logging.getLogger(__name__)
 
@@ -109,46 +109,24 @@ def create_app() -> FastAPI:
     # --- 统一任务路由 ---
 
     class TaskRequest(BaseModel):
-        """创建任务的请求体。
-
-        三种任务类型共用同一请求体，通过 type 区分：
-        - ingestion/training: 需要 input, script, output
-        - inference: 需要 model
-        """
-        type: TaskType
+        """创建任务的请求体。所有任务统一接口。"""
         name: str
-        # 批处理字段（ingestion/training 使用）
-        input: str | None = None
-        script: str | None = None
+        input: str = ""
+        script: str
+        output: str = ""
         params: dict = {}
-        output: str | None = None
-        # 推理字段（inference 使用）
-        model: str | None = None
-        device: str | None = None
-        port: int | None = None
 
     @app.post("/api/v1/tasks", status_code=201)
     def create_task(req: TaskRequest):
-        """创建任务。
-
-        根据 type 字段校验必填参数，然后交给 TaskManager 处理。
-        """
-        logger.info(f"收到请求: 创建任务, 类型: {req.type}, 名称: {req.name}")
-        # 参数校验：批处理任务需要 input/script/output
-        if req.type in (TaskType.INGESTION, TaskType.TRAINING):
-            if not all([req.input, req.script, req.output]):
-                raise HTTPException(400, {"code": "INVALID_REQUEST", "message": "批处理任务需要 input, script, output 字段"})
-        # 参数校验：推理任务需要 model
-        elif req.type == TaskType.INFERENCE:
-            if not req.model:
-                raise HTTPException(400, {"code": "INVALID_REQUEST", "message": "推理任务需要 model 字段"})
-        return _manager.create(req.type, req.model_dump(exclude_none=True))
+        """创建任务。统一校验 script 必填，然后交给 TaskManager 处理。"""
+        logger.info(f"收到请求: 创建任务, 名称: {req.name}")
+        return _manager.create(req.model_dump())
 
     @app.get("/api/v1/tasks")
-    def list_tasks(type: TaskType | None = Query(None)):
-        """列出所有任务，可通过 ?type=ingestion 按类型过滤。"""
-        logger.info(f"收到请求: 列出任务, 过滤类型: {type}")
-        return _manager.list_all(type)
+    def list_tasks():
+        """列出所有任务。"""
+        logger.info("收到请求: 列出任务")
+        return _manager.list_all()
 
     @app.get("/api/v1/tasks/{task_id}")
     def get_task(task_id: str):
@@ -165,26 +143,6 @@ def create_app() -> FastAPI:
         if not _manager.cancel(task_id):
             raise HTTPException(404, {"code": "TASK_NOT_FOUND", "message": f"任务 '{task_id}' 不存在或未在运行"})
         return {"status": "cancelled"}
-
-    class PredictRequest(BaseModel):
-        """推理请求体。"""
-        image: list[float]  # 784 维浮点数组（28x28 归一化像素值）
-
-    @app.post("/api/v1/tasks/{task_id}/predict")
-    def predict(task_id: str, body: PredictRequest):
-        """调用推理（仅 type=inference 的任务支持）。"""
-        task = _manager.get(task_id)
-        if task is None:
-            raise HTTPException(404, {"code": "TASK_NOT_FOUND", "message": f"任务 '{task_id}' 不存在"})
-        if task.get("type") != TaskType.INFERENCE:
-            raise HTTPException(400, {"code": "INVALID_REQUEST", "message": "只有推理任务支持 predict"})
-        if task.get("status") != "running":
-            raise HTTPException(400, {"code": "INVALID_REQUEST", "message": "推理服务未在运行"})
-        logger.info(f"收到推理请求: {task_id}")
-        try:
-            return _manager.predict(task_id, body.image)
-        except ValueError as e:
-            raise HTTPException(500, {"code": "INFERENCE_ERROR", "message": str(e)})
 
     return app
 

@@ -1,11 +1,10 @@
 """Unit tests for orchestrator."""
 
-import time
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from orchestrator.tasks import TaskManager, TaskType, TaskStatus
+from orchestrator.tasks import TaskManager, TaskStatus
 
 
 @pytest.fixture
@@ -14,69 +13,76 @@ def manager():
 
 
 class TestTaskManager:
-    def test_create_ingestion_task_executor_down(self, manager):
+    def test_create_task_executor_down(self, manager):
         """When Executor is unreachable, task should fail."""
-        result = manager.create(TaskType.INGESTION, {
+        result = manager.create({
             "name": "test",
             "input": "/in",
             "script": "test.py",
             "params": {},
             "output": "/out",
         })
-        assert result["type"] == "ingestion"
         assert result["name"] == "test"
+        assert result["script"] == "test.py"
         # Executor is not running, so task should fail
         assert result["status"] == "failed"
 
-    def test_create_inference_task_executor_down(self, manager):
-        """Inference task fails when model can't be loaded from Executor."""
-        result = manager.create(TaskType.INFERENCE, {
-            "name": "predictor",
-            "model": "nonexistent",
-            "device": "cpu",
-            "port": 8080,
-        })
-        assert result["type"] == "inference"
-        assert result["status"] == "failed"
-
-    def test_create_inference_task_with_mock(self, manager):
-        """Inference task succeeds when Executor returns model info."""
+    def test_create_task_with_mock(self, manager):
+        """Task succeeds when Executor accepts it."""
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
+        mock_resp.status_code = 201
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {
-            "id": "test_model",
-            "path": "lance_storage/models/mnist_cnn_v1.lance",
-            "schema": {"weights": "Binary"},
-            "num_rows": 1,
+            "id": "task-abc123",
+            "status": "running",
+            "created_at": "2026-01-01T00:00:00Z",
         }
 
-        with patch("orchestrator.tasks.httpx.get", return_value=mock_resp):
-            # Will still fail because Lance file doesn't exist in test env
-            result = manager.create(TaskType.INFERENCE, {
-                "name": "predictor",
-                "model": "test_model",
-                "device": "cpu",
-                "port": 8080,
+        with patch("orchestrator.tasks.httpx.post", return_value=mock_resp):
+            result = manager.create({
+                "name": "mnist_ingestion",
+                "input": "download",
+                "script": "scripts/pipelines/mnist_clean.py",
+                "output": "lance_storage/datasets/mnist_clean.lance",
+                "params": {"normalize": True},
             })
-            assert result["type"] == "inference"
+            assert result["status"] == "running"
+            assert result["name"] == "mnist_ingestion"
+
+    def test_create_serving_task_with_mock(self, manager):
+        """Serving task (port in params) succeeds when Executor accepts it."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 201
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "id": "task-serve1",
+            "status": "running",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+
+        with patch("orchestrator.tasks.httpx.post", return_value=mock_resp):
+            result = manager.create({
+                "name": "mnist_serve",
+                "input": "lance_storage/models/mnist_cnn_v1.lance",
+                "script": "scripts/serving/mnist_serve.py",
+                "output": "",
+                "params": {"device": "cpu", "port": 8080},
+            })
+            assert result["status"] == "running"
+            assert result["params"] == {"device": "cpu", "port": 8080}
 
     def test_list_all_empty(self, manager):
         assert manager.list_all() == []
 
-    def test_list_all_with_filter(self, manager):
-        manager.create(TaskType.INGESTION, {
+    def test_list_all_returns_all_tasks(self, manager):
+        manager.create({
             "name": "t1", "input": "/in", "script": "s.py", "params": {}, "output": "/out",
         })
-        manager.create(TaskType.INFERENCE, {
-            "name": "t2", "model": "m", "device": "cpu", "port": 8080,
+        manager.create({
+            "name": "t2", "input": "/in2", "script": "s2.py", "params": {}, "output": "/out2",
         })
         all_tasks = manager.list_all()
         assert len(all_tasks) == 2
-
-        ingestion_only = manager.list_all(TaskType.INGESTION)
-        assert len(ingestion_only) == 1
-        assert ingestion_only[0]["type"] == "ingestion"
 
     def test_get_nonexistent(self, manager):
         assert manager.get("nonexistent") is None
@@ -84,17 +90,44 @@ class TestTaskManager:
     def test_cancel_nonexistent(self, manager):
         assert manager.cancel("nonexistent") is False
 
-    def test_cancel_running_task(self, manager):
-        result = manager.create(TaskType.INFERENCE, {
-            "name": "predictor", "model": "m", "device": "cpu", "port": 8080,
+    def test_cancel_failed_task_returns_false(self, manager):
+        result = manager.create({
+            "name": "test", "input": "/in", "script": "s.py", "params": {}, "output": "/out",
         })
         task_id = result["id"]
         # Task failed because executor is down, so cancel should return False
         assert manager.cancel(task_id) is False
 
+    def test_cancel_running_task_with_mock(self, manager):
+        """Cancel a running task."""
+        mock_post = MagicMock()
+        mock_post.status_code = 201
+        mock_post.raise_for_status = MagicMock()
+        mock_post.json.return_value = {
+            "id": "task-exec1",
+            "status": "running",
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+
+        with patch("orchestrator.tasks.httpx.post", return_value=mock_post):
+            result = manager.create({
+                "name": "test", "input": "/in", "script": "s.py", "params": {}, "output": "/out",
+            })
+            task_id = result["id"]
+            assert result["status"] == "running"
+
+        # Cancel the running task
+        with patch("orchestrator.tasks.httpx.post") as mock_cancel:
+            assert manager.cancel(task_id) is True
+
+        # Verify task is now failed with cancelled error
+        task = manager.get(task_id)
+        assert task["status"] == "failed"
+        assert task["error"] == "cancelled"
+
     def test_public_view_hides_internal_fields(self, manager):
         """Internal fields starting with _ should not appear in output."""
-        result = manager.create(TaskType.INGESTION, {
+        result = manager.create({
             "name": "test", "input": "/in", "script": "s.py", "params": {}, "output": "/out",
         })
         for key in result:
@@ -102,8 +135,15 @@ class TestTaskManager:
 
     def test_public_view_hides_none_fields(self, manager):
         """None-valued fields should not appear in output."""
-        result = manager.create(TaskType.INGESTION, {
+        result = manager.create({
             "name": "test", "input": "/in", "script": "s.py", "params": {}, "output": "/out",
         })
         for value in result.values():
             assert value is not None
+
+    def test_no_type_field_in_response(self, manager):
+        """Response should not contain a 'type' field."""
+        result = manager.create({
+            "name": "test", "input": "/in", "script": "s.py", "params": {}, "output": "/out",
+        })
+        assert "type" not in result

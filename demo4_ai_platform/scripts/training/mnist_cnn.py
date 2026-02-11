@@ -28,7 +28,7 @@ class MnistCNN(nn.Module):
     """简单的 MNIST CNN 分类器。
 
     两层卷积 + 两层全连接，输入 28x28 灰度图，输出 10 类概率。
-    注意: orchestrator/tasks.py 中的 _MnistCNN 必须与此结构完全一致。
+    注意: scripts/serving/mnist_serve.py 中的 MnistCNN 必须与此结构完全一致。
     """
 
     def __init__(self):

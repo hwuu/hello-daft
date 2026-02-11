@@ -10,7 +10,7 @@
 
 | 服务 | 职责 |
 |------|------|
-| **Orchestrator** | 用户唯一入口，任务编排、代理查询、推理服务 |
+| **Orchestrator** | 用户唯一入口，任务编排、代理查询 |
 | **Executor** | 数据湖存储（Lance）+ 脚本执行器（Daft） |
 
 ## 快速开始
@@ -43,9 +43,10 @@ jupyter notebook 01_ai_platform_tutorial.ipynb
 # 2. 创建推理任务
 curl -X POST http://localhost:8000/api/v1/tasks \
   -H "Content-Type: application/json" \
-  -d '{"type":"inference","name":"mnist","model":"mnist_cnn_v1","device":"cpu","port":8080}'
+  -d '{"name":"mnist_serve","input":"lance_storage/models/mnist_cnn_v1.lance","script":"scripts/serving/mnist_serve.py","output":"","params":{"device":"cpu","port":8080}}'
 
 # 3. 用浏览器打开 web/index.html
+# 4. 配置区填入推理服务地址（默认 http://localhost:8080）
 ```
 
 ## 目录结构
@@ -67,6 +68,7 @@ demo4_ai_platform/
 │   └── tasks.py                 # 统一任务管理
 ├── scripts/                     # 用户脚本
 │   ├── pipelines/mnist_clean.py # MNIST 数据清洗
-│   └── training/mnist_cnn.py    # CNN 训练
+│   ├── training/mnist_cnn.py    # CNN 训练
+│   └── serving/mnist_serve.py   # 推理服务
 └── tests/unit/                  # 单元测试
 ```
