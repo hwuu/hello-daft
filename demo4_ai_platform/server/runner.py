@@ -41,23 +41,25 @@ class TaskRunner:
         self._tasks: dict[str, dict] = {}  # task_id -> 任务状态字典
         self._lock = threading.Lock()       # 保护 _tasks 的并发访问
 
-    def submit(self, script: str, input_path: str, output_path: str, params: dict) -> dict:
+    def submit(self, name: str, script: str, input_path: str, output_path: str, params: dict) -> dict:
         """提交一个新任务。
 
         加载用户脚本并在后台线程中执行 run() 函数。
 
         Args:
+            name: 任务名称
             script: 用户脚本路径（需包含 run() 函数）
             input_path: 输入数据路径
             output_path: 输出数据路径
             params: 用户自定义参数
         Returns:
-            任务摘要（id, status, created_at）
+            任务公开视图
         """
         task_id = f"task-{uuid.uuid4().hex[:8]}"
         now = datetime.now(timezone.utc).isoformat()
         task = {
             "id": task_id,
+            "name": name,
             "script": script,
             "input": input_path,
             "output": output_path,
@@ -71,12 +73,12 @@ class TaskRunner:
         with self._lock:
             self._tasks[task_id] = task
 
-        logger.info(f"任务已提交: {task_id}, 脚本: {script}")
+        logger.info(f"任务已提交: {task_id}, 名称: {name}, 脚本: {script}")
 
         # 在后台线程中执行，避免阻塞 API 请求
         thread = threading.Thread(target=self._execute, args=(task_id,), daemon=True)
         thread.start()
-        return {"id": task_id, "status": task["status"], "created_at": now}
+        return self._public_view(task)
 
     def get(self, task_id: str) -> dict | None:
         """查询任务状态。返回 None 表示任务不存在。"""
@@ -84,15 +86,14 @@ class TaskRunner:
             task = self._tasks.get(task_id)
         if task is None:
             return None
-        # 不暴露脚本路径（内部信息）
-        return {k: v for k, v in task.items() if k != "script"}
+        return self._public_view(task)
 
     def list_all(self) -> list[dict]:
         """列出所有任务的摘要信息。"""
         with self._lock:
             tasks = list(self._tasks.values())
         return [
-            {"id": t["id"], "status": t["status"], "created_at": t["created_at"]}
+            {"id": t["id"], "name": t["name"], "status": t["status"], "created_at": t["created_at"]}
             for t in tasks
         ]
 
@@ -113,6 +114,10 @@ class TaskRunner:
                 logger.info(f"任务已取消: {task_id}")
                 return True
         return False
+
+    def _public_view(self, task: dict) -> dict:
+        """返回任务的公开视图，过滤掉内部字段（script）和 None 值。"""
+        return {k: v for k, v in task.items() if k != "script" and v is not None}
 
     def _execute(self, task_id: str):
         """在后台线程中执行用户脚本。

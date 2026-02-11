@@ -2,7 +2,7 @@
 MNIST CNN 训练脚本。
 
 从 Lance 数据湖读取 MNIST 数据，训练简单的 CNN 模型，将权重保存回 Lance。
-实现 run(input_path, output_path, params) 接口，供 Executor 调用。
+实现 run(input_path, output_path, params) 接口，供 Server 调用。
 
 数据流: Lance 数据集 -> PyTorch DataLoader -> 训练 -> 模型权重写入 Lance
 模型结构: Conv(1→16) -> Pool -> Conv(16→32) -> Pool -> FC(1568→128) -> FC(128→10)

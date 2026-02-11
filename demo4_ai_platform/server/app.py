@@ -1,17 +1,19 @@
 """
-Executor HTTP API 模块。
+AI Platform HTTP API 模块。
 
-提供数据湖存储和计算任务的 RESTful API。
-Executor 是内部服务，由 Orchestrator 调用，不直接面向用户。
+提供数据湖存储、计算任务、数据集/模型查询的 RESTful API。
+用户唯一入口。
 
 启动方式:
-    uvicorn executor.app:app --port 8001
+    uvicorn server.app:app --port 8000
 """
 
 import logging
 from contextlib import asynccontextmanager
 
+import yaml
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .runner import TaskRunner
@@ -24,24 +26,46 @@ _storage: Storage | None = None
 _runner: TaskRunner | None = None
 
 
-def create_app(storage_path: str = "./lance_storage") -> FastAPI:
-    """创建 Executor FastAPI 应用。
+def _load_config() -> dict:
+    """加载配置文件。找不到时使用默认值。"""
+    try:
+        with open("config.yaml") as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        logger.warning("未找到 config.yaml，使用默认配置")
+        return {"server": {"host": "http://localhost:8000", "storage_path": "./lance_storage"}}
+
+
+def create_app(storage_path: str | None = None) -> FastAPI:
+    """创建 AI Platform FastAPI 应用。
 
     Args:
-        storage_path: 数据湖根目录路径
+        storage_path: 数据湖根目录路径（为 None 时从 config.yaml 读取）
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """应用生命周期管理：启动时初始化存储和执行器。"""
         global _storage, _runner
-        _storage = Storage(storage_path)
+        path = storage_path
+        if path is None:
+            config = _load_config()
+            path = config.get("server", {}).get("storage_path", "./lance_storage")
+        _storage = Storage(path)
         _runner = TaskRunner()
-        logger.info(f"Executor 启动完成，存储路径: {storage_path}")
+        logger.info(f"AI Platform 启动完成，存储路径: {path}")
         yield
-        logger.info("Executor 关闭")
+        logger.info("AI Platform 关闭")
 
-    app = FastAPI(title="Executor", lifespan=lifespan)
+    app = FastAPI(title="AI Platform", lifespan=lifespan)
+
+    # 允许 Web 页面跨域访问 API（本地开发用）
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # 配置日志格式
     logging.basicConfig(
@@ -49,7 +73,7 @@ def create_app(storage_path: str = "./lance_storage") -> FastAPI:
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
-    # --- 数据集路由（供 Orchestrator 代理查询） ---
+    # --- 数据集路由 ---
 
     @app.get("/api/v1/datasets")
     def list_datasets():
@@ -74,7 +98,7 @@ def create_app(storage_path: str = "./lance_storage") -> FastAPI:
             raise HTTPException(404, {"code": "DATASET_NOT_FOUND", "message": f"数据集 '{dataset_id}' 不存在"})
         return {"status": "deleted"}
 
-    # --- 模型路由（供 Orchestrator 代理查询） ---
+    # --- 模型路由 ---
 
     @app.get("/api/v1/models")
     def list_models():
@@ -102,22 +126,18 @@ def create_app(storage_path: str = "./lance_storage") -> FastAPI:
     # --- 计算任务路由 ---
 
     class TaskRequest(BaseModel):
-        """计算任务请求体。
-
-        Executor 的任务不区分 type（ingestion/training），
-        统一执行用户脚本的 run(input, output, params) 函数。
-        type 的区分由 Orchestrator 负责。
-        """
-        script: str   # 用户脚本路径
-        input: str    # 输入数据路径
-        output: str   # 输出数据路径
-        params: dict = {}  # 用户自定义参数
+        """计算任务请求体。统一执行用户脚本的 run(input, output, params) 函数。"""
+        name: str         # 任务名称
+        script: str       # 用户脚本路径
+        input: str = ""   # 输入数据路径
+        output: str = ""  # 输出数据路径
+        params: dict = {} # 用户自定义参数
 
     @app.post("/api/v1/tasks", status_code=201)
-    def submit_task(req: TaskRequest):
-        """提交计算任务（执行用户脚本）。"""
-        logger.info(f"收到请求: 提交任务, 脚本: {req.script}")
-        return _runner.submit(req.script, req.input, req.output, req.params)
+    def create_task(req: TaskRequest):
+        """创建计算任务（执行用户脚本）。"""
+        logger.info(f"收到请求: 创建任务, 名称: {req.name}, 脚本: {req.script}")
+        return _runner.submit(req.name, req.script, req.input, req.output, req.params)
 
     @app.get("/api/v1/tasks")
     def list_tasks():

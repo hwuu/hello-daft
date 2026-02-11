@@ -2,7 +2,7 @@
 MNIST 推理服务脚本。
 
 从 Lance 数据湖加载模型权重，启动 FastAPI 子服务提供推理 API。
-实现 run(input_path, output_path, params) 接口，供 Executor 调用。
+实现 run(input_path, output_path, params) 接口，供 Server 调用。
 
 数据流: Lance 模型文件 -> PyTorch 加载权重 -> FastAPI 提供 /predict 端点
 """

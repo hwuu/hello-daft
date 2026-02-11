@@ -2,7 +2,7 @@
 MNIST 数据清洗脚本。
 
 下载 MNIST 数据集，归一化像素值，写入 Lance 格式。
-实现 run(input_path, output_path, params) 接口，供 Executor 调用。
+实现 run(input_path, output_path, params) 接口，供 Server 调用。
 
 数据流: MNIST IDX 文件 -> 归一化 -> Arrow Table -> Lance 文件
 输出 schema: image(List[Float64]), label(Int64), split(String)

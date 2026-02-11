@@ -1,17 +1,14 @@
-# Demo 4: AI Platform — 微服务架构的 ML 平台
+# Demo 4: AI Platform — 单服务 ML 平台
 
 基于 Daft + Lance + PyTorch 构建的教学级 AI 平台，演示数据入库、模型训练、推理服务的完整流程。
 
 ## 架构
 
 ```
-用户 --> Orchestrator (8000) --> Executor (8001) --> Lance 数据湖
+用户 --> Server (8000) --> Lance 数据湖
 ```
 
-| 服务 | 职责 |
-|------|------|
-| **Orchestrator** | 用户唯一入口，任务编排、代理查询 |
-| **Executor** | 数据湖存储（Lance）+ 脚本执行器（Daft） |
+Server 统一提供数据湖存储（Lance）、脚本执行（Daft）和 RESTful API。
 
 ## 快速开始
 
@@ -21,8 +18,7 @@ pip install -r demo4_ai_platform/requirements.txt
 
 # 2. 启动服务
 cd demo4_ai_platform
-uvicorn executor.app:app --port 8001 &
-uvicorn orchestrator.app:app --port 8000 &
+uvicorn server.app:app --port 8000
 
 # 3. 打开 Notebook 教程
 jupyter notebook 01_ai_platform_tutorial.ipynb
@@ -62,12 +58,9 @@ demo4_ai_platform/
 │   ├── mnist_cnn.py             # CNN 训练
 │   ├── mnist_serve.py           # 推理服务
 │   └── index.html               # 手写数字识别 Web Demo
-├── executor/                    # Executor 微服务
+├── server/                      # AI Platform 服务
 │   ├── app.py                   # HTTP API
 │   ├── storage.py               # Lance 存储封装
 │   └── runner.py                # 脚本执行器
-├── orchestrator/                # Orchestrator 微服务
-│   ├── app.py                   # HTTP API
-│   └── tasks.py                 # 统一任务管理
 └── tests/unit/                  # 单元测试
 ```
