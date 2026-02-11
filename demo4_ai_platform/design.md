@@ -72,19 +72,19 @@
 |                           AI Platform                                |
 |                                                                      |
 |  +----------------------------------------------------------------+  |
-|  |  Orchestrator (RESTful API: FastAPI)                            |  |
+|  |  Orchestrator (RESTful API: FastAPI)                           |  |
 |  |  +----------------------------------------------------------+  |  |
-|  |  | Task Manager (ingestion / training / inference)           |  |  |
+|  |  | Task Manager (ingestion / training / inference)          |  |  |
 |  |  +----------------------------+-----------------------------+  |  |
 |  |                               |                                |  |
 |  +-------------------------------+--------------------------------+  |
 |                                  |                                   |
 |                                  v                                   |
 |  +----------------------------------------------------------------+  |
-|  |  Executor (RESTful API: FastAPI)                                |  |
+|  |  Executor (RESTful API: FastAPI)                               |  |
 |  |  +-----------------+  +--------------------+  +--------------+ |  |
 |  |  | Daft            |  | Ray                |  | Lance +      | |  |
-|  |  | (Compute)       |  | (Optional Runtime) |  | LanceDB     | |  |
+|  |  | (Compute)       |  | (Optional Runtime) |  | LanceDB      | |  |
 |  |  |                 |  |                    |  | (Storage)    | |  |
 |  |  +-----------------+  +--------------------+  +--------------+ |  |
 |  +----------------------------------------------------------------+  |
@@ -386,9 +386,8 @@ GET /api/v1/datasets
     {
         "id": "mnist_clean",
         "path": "lance_storage/datasets/mnist_clean.lance",
-        "schema": {"image": "binary", "label": "int64", "split": "string"},
-        "num_rows": 70000,
-        "size_bytes": 52428800
+        "schema": {"image": "List[Float64]", "label": "Int64", "split": "String"},
+        "num_rows": 70000
     }
 ]
 ```
@@ -511,17 +510,13 @@ GET /api/v1/datasets/mnist_clean
 200 OK
 {
     "id": "mnist_clean",
-    "created_at": "2026-02-10T10:01:30Z",
-    "storage_path": "lance_storage/datasets/mnist_clean.lance",
+    "path": "lance_storage/datasets/mnist_clean.lance",
     "schema": {
-        "image": "binary",
-        "label": "int64",
-        "split": "string"
+        "image": "List[Float64]",
+        "label": "Int64",
+        "split": "String"
     },
-    "stats": {
-        "total_records": 70000,
-        "size_bytes": 52428800
-    }
+    "num_rows": 70000
 }
 ```
 
@@ -608,9 +603,11 @@ POST /api/v1/tasks
 POST /api/v1/tasks/task-003/predict
 Content-Type: application/json
 {
-    "image": "<base64 encoded image>"
+    "image": [0.0, 0.0, ..., 0.984, ..., 0.0]
 }
 ```
+
+> `image` 是 784 维浮点数组（28x28 归一化像素值，范围 [0, 1]）。
 
 ```
 200 OK
@@ -787,21 +784,27 @@ def run(input_path: str, output_path: str, params: dict) -> dict:
 +------------------+     +------------------+     +------------------+
 ```
 
-从数据湖加载模型，启动 FastAPI 服务：
+从数据湖加载模型，在 Orchestrator 进程内提供推理：
 
 ```python
-# 从数据湖加载模型
-table = db.open_table(model_name)
-record = table.to_pandas().iloc[0]
+# orchestrator/tasks.py — 加载模型并推理
+import daft, torch
+
+# 从数据湖读取模型权重
+df = daft.read_lance("lance_storage/models/mnist_cnn_v1.lance")
+pdf = df.to_pandas()
+weights_bytes = pdf["weights"].iloc[0]
+
+# 反序列化权重并加载到 PyTorch 模型
 model = MnistCNN()
-model.load_state_dict(deserialize(record["weights"]))
+model.load_state_dict(torch.load(io.BytesIO(weights_bytes), weights_only=True))
 model.eval()
 
-# 启动 FastAPI
-@app.post("/predict")
-async def predict(request: PredictRequest):
-    image = decode_base64_image(request.image)
-    tensor = preprocess(image)
+# 推理
+@app.post("/api/v1/tasks/{task_id}/predict")
+def predict(task_id: str, body: PredictRequest):
+    # body.image: 784 维浮点数组
+    tensor = torch.tensor(body.image).reshape(1, 1, 28, 28)
     with torch.no_grad():
         output = model(tensor)
     probs = torch.softmax(output, dim=1)

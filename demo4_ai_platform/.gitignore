@@ -1,3 +1,12 @@
+# 数据湖（运行时数据）
 lance_storage/
+
+# MNIST 原始数据（下载缓存）
+download/
+
+# Python
 __pycache__/
 *.pyc
+
+# 测试
+.pytest_cache/
