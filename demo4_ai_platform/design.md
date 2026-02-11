@@ -6,28 +6,29 @@
   - [1.1 问题](#11-问题)
   - [1.2 火山引擎的启发](#12-火山引擎的启发)
   - [1.3 设计目标](#13-设计目标)
-- [2. 架构总览](#2-架构总览)
+- [2. 架构设计](#2-架构设计)
   - [2.1 核心分层](#21-核心分层)
-  - [2.2 部署级别](#22-部署级别)
-  - [2.3 可定制性设计](#23-可定制性设计)
-- [3. Server](#3-server)
-  - [3.1 组件职责](#31-组件职责)
-  - [3.2 RESTful API](#32-restful-api)
-  - [3.3 数据湖目录结构](#33-数据湖目录结构)
-  - [3.4 任务状态机](#34-任务状态机)
-  - [3.5 错误处理](#35-错误处理)
-- [4. 解耦设计](#4-解耦设计)
-  - [4.1 脚本与平台的解耦](#41-脚本与平台的解耦)
-  - [4.2 可替换性](#42-可替换性)
-- [5. 核心任务流](#5-核心任务流)
-  - [5.1 数据入库](#51-数据入库)
-  - [5.2 模型训练](#52-模型训练)
-  - [5.3 推理服务](#53-推理服务)
-- [6. MNIST 实现规划](#6-mnist-实现规划)
-  - [6.1 目录结构](#61-目录结构)
-  - [6.2 实现步骤](#62-实现步骤)
-  - [6.3 技术选型](#63-技术选型)
-  - [6.4 配置](#64-配置)
+  - [2.2 解耦设计](#22-解耦设计)
+- [3. 任务模型](#3-任务模型)
+  - [3.1 统一脚本接口](#31-统一脚本接口)
+  - [3.2 任务状态机](#32-任务状态机)
+  - [3.3 数据入库](#33-数据入库)
+  - [3.4 模型训练](#34-模型训练)
+  - [3.5 推理服务](#35-推理服务)
+- [4. Server](#4-server)
+  - [4.1 组件职责](#41-组件职责)
+  - [4.2 RESTful API](#42-restful-api)
+  - [4.3 数据湖目录结构](#43-数据湖目录结构)
+  - [4.4 错误处理](#44-错误处理)
+- [5. MNIST 实现规划](#5-mnist-实现规划)
+  - [5.1 目录结构](#51-目录结构)
+  - [5.2 实现步骤](#52-实现步骤)
+  - [5.3 技术选型](#53-技术选型)
+  - [5.4 配置](#54-配置)
+- [6. 部署级别](#6-部署级别)
+  - [6.1 Level 1: 单机单任务](#61-level-1-单机单任务)
+  - [6.2 Level 2: 单机多任务](#62-level-2-单机多任务)
+  - [6.3 Level 3: 多机多任务](#63-level-3-多机多任务)
 - [参考文献](#参考文献)
 
 ## 1. 背景与目标
@@ -60,7 +61,7 @@
 
 平台不绑定特定数据集或模型，所有业务逻辑由用户脚本实现。
 
-## 2. 架构总览
+## 2. 架构设计
 
 ### 2.1 核心分层
 
@@ -83,163 +84,46 @@
 +----------------------------------------------------------------------+
 ```
 
-用户通过 Server 的 RESTful API 操作全部功能。任务是高度可定制的——用户提供自己的脚本，平台只负责调度和存储（详见 [2.3 可定制性设计](#23-可定制性设计)）。
+用户通过 Server 的 RESTful API 操作全部功能。任务是高度可定制的——用户提供自己的脚本，平台只负责调度和存储（详见 [2.2 解耦设计](#22-解耦设计)）。
 
-### 2.2 部署级别
+### 2.2 解耦设计
 
-根据负载规模，系统有三个部署级别。Server API 层不变，底层四个维度逐步升级：
+平台与用户脚本通过 **Lance 格式 + run() 接口**解耦。
 
-| 维度 | Level 1 | Level 2 | Level 3 |
-|------|---------|---------|---------|
-| **Compute** | Daft local runner | Daft on Ray | Daft on Ray (K8s) |
-| **Scheduling** | Sequential (in-memory) | Ray Tasks (concurrent) | Ray Workflows (persistent) |
-| **Serving** | User script (subprocess) | Ray Serve | Ray Serve on K8s |
-| **Storage** | Lance local files | Lance local files | Lance on S3/MinIO |
+#### 脚本与平台的解耦
 
-#### Level 1: 单机单任务
+平台不关心业务逻辑，只提供基础设施：
 
-最简部署，适合开发调试和小规模数据（如 MNIST）。
+| 平台提供的 | 用户脚本负责的 |
+|---|---|
+| 数据读写（Lance） | 清洗逻辑、特征工程 |
+| 计算资源（Daft/Ray） | 训练代码和超参数 |
+| 存储管理 | 模型版本管理策略 |
+| 任务调度和生命周期 | 推理服务和 API 设计 |
 
-```
-+------------------------------------------------------------------+
-|  Single Machine                                                  |
-|                                                                  |
-|  +------------------------------------------------------------+  |
-|  |  Server (FastAPI, :8000)                                   |  |
-|  |  +------------+  +-------------+  +---------------------+  |  |
-|  |  | GET /data  |  | GET /models |  | POST/GET /tasks     |  |  |
-|  |  +------+-----+  +------+------+  +----------+----------+  |  |
-|  |         |               |                     |             |  |
-|  |         v               v                     v             |  |
-|  |  +------------+  +------------+  +----------------------+  |  |
-|  |  | Storage    |  | Storage    |  | TaskRunner           |  |  |
-|  |  | (Lance R/W)|  | (Lance R/W)|  | (thread per task)    |  |  |
-|  |  +------+-----+  +------+-----+  +---+----------+------+  |  |
-|  |         |               |             |          |          |  |
-|  +------------------------------------------------------------+  |
-|            |               |             |          |            |
-|            v               v             v          v            |
-|  +-----------------------------+  +-----------+ +----------+    |
-|  |  lance_storage/             |  | User      | | User     |    |
-|  |  +----------+ +---------+  |  | Script    | | Script   |    |
-|  |  | datasets/| | models/ |  |  | (Daft     | | (uvicorn |    |
-|  |  | *.lance  | | *.lance |  |  |  local)   | |  :8080)  |    |
-|  |  +----------+ +---------+  |  +-----------+ +----------+    |
-|  +-----------------------------+   Batch task    Serve task     |
-+------------------------------------------------------------------+
-```
+用户脚本只需实现 `run(input_path, output_path, params) → dict`，平台负责调用和管理。
 
-- 任务串行执行，每个任务在独立线程中运行用户脚本
-- 推理服务由用户脚本自行启动 FastAPI 子进程（如 :8080）
-- 依赖：不需要 Ray，不需要 K8s
+#### 可替换性
 
-#### Level 2: 单机多任务
+- **替换存储**（如 Lance → Parquet + Milvus）：改 Storage 模块即可，用户脚本不受影响
+- **替换计算**（如 Daft → Spark）：改 TaskRunner 即可，只要脚本接口不变
+- **替换训练框架**（如 PyTorch → TensorFlow）：平台不受影响，用户脚本自行选择
 
-引入 Ray 作为本地运行时，支持并发任务和资源隔离。
-
-```
-+------------------------------------------------------------------+
-|  Single Machine                                                  |
-|                                                                  |
-|  +------------------------------------------------------------+  |
-|  |  Server (FastAPI, :8000)                                   |  |
-|  |  +------------+  +-------------+  +---------------------+  |  |
-|  |  | GET /data  |  | GET /models |  | POST/GET /tasks     |  |  |
-|  |  +------+-----+  +------+------+  +----------+----------+  |  |
-|  |         |               |                     |             |  |
-|  |         v               v                     v             |  |
-|  |  +------------+  +------------+  +----------------------+  |  |
-|  |  | Storage    |  | Storage    |  | TaskRunner           |  |  |
-|  |  | (Lance R/W)|  | (Lance R/W)|  | (submit to Ray)      |  |  |
-|  |  +------+-----+  +------+-----+  +---+----------+------+  |  |
-|  |         |               |             |          |          |  |
-|  +------------------------------------------------------------+  |
-|            |               |             |          |            |
-|            v               v             v          v            |
-|  +-----------------------------+  +------------------------+    |
-|  |  lance_storage/             |  | Ray (local cluster)    |    |
-|  |  +----------+ +---------+  |  | +--------+ +--------+  |    |
-|  |  | datasets/| | models/ |  |  | | Task 1 | | Task 2 |  |    |
-|  |  | *.lance  | | *.lance |  |  | | (Daft  | | (Daft  |  |    |
-|  |  +----------+ +---------+  |  | |  on Ray| |  on Ray|  |    |
-|  +-----------------------------+  | +--------+ +--------+  |    |
-|                                   | +--------------------+  |    |
-|                                   | | Ray Serve          |  |    |
-|                                   | | (model replicas)   |  |    |
-|                                   | +--------------------+  |    |
-|                                   +------------------------+    |
-+------------------------------------------------------------------+
-```
-
-- Daft 切换 Ray runner（`set_runner_ray()`），多任务并发
-- Ray Serve 管理模型副本，支持多模型同时服务
-- 依赖：需要 Ray，不需要 K8s
-
-**Level 1 → 2 的改动点：**
-
-| 维度 | 改动 |
-|------|------|
-| Compute | `daft.context.set_runner_ray()` |
-| Scheduling | 内存状态机 → Ray Tasks |
-| Serving | FastAPI subprocess → Ray Serve |
-| Storage | 不变 |
-
-#### Level 3: 多机多任务
-
-Ray 集群部署在 K8s 上，存储切换到共享对象存储。
-
-```
-+------------------------------------------------------------------+
-|  K8s Cluster                                                     |
-|                                                                  |
-|  +------------------------------------------------------------+  |
-|  |  Server Pod (FastAPI, :8000)                               |  |
-|  |  +------------+  +-------------+  +---------------------+  |  |
-|  |  | GET /data  |  | GET /models |  | POST/GET /tasks     |  |  |
-|  |  +------+-----+  +------+------+  +----------+----------+  |  |
-|  |         |               |                     |             |  |
-|  |         v               v                     v             |  |
-|  |  +------------+  +------------+  +----------------------+  |  |
-|  |  | Storage    |  | Storage    |  | TaskRunner           |  |  |
-|  |  | (Lance R/W)|  | (Lance R/W)|  | (Ray Workflows)      |  |  |
-|  |  +------+-----+  +------+-----+  +---+----------+------+  |  |
-|  +------------------------------------------------------------+  |
-|            |               |             |          |            |
-|            v               v             v          v            |
-|  +-----------------------------+  +------------------------+    |
-|  |  S3 / MinIO (shared)       |  | Ray on K8s (KubeRay)   |    |
-|  |  s3://bucket/lance_storage/ |  | +--------+ +--------+  |    |
-|  |  +----------+ +---------+  |  | | Worker | | Worker |  |    |
-|  |  | datasets/| | models/ |  |  | | Node 1 | | Node 2 |  |    |
-|  |  | *.lance  | | *.lance |  |  | | (Daft) | | (Train)|  |    |
-|  |  +----------+ +---------+  |  | +--------+ +--------+  |    |
-|  +-----------------------------+  | +--------------------+  |    |
-|                                   | | Ray Serve          |  |    |
-|                                   | | (multi-replica)    |  |    |
-|                                   | +--------------------+  |    |
-|                                   +------------------------+    |
-+------------------------------------------------------------------+
-```
-
-- Ray on K8s 自动扩缩容，多节点并行
-- Ray Workflows 持久化任务状态，支持故障恢复
-- Lance 文件在 S3/MinIO 上，多节点共享
-- 依赖：需要 Ray、K8s、MinIO/S3
-
-**Level 2 → 3 的改动点：**
-
-| 维度 | 改动 |
-|------|------|
-| Compute | Ray 本地集群 → KubeRay Operator |
-| Scheduling | Ray Tasks → Ray Workflows |
-| Serving | Ray Serve 本地 → Ray Serve on K8s |
-| Storage | `./lance_storage/` → `s3://bucket/lance_storage/` |
-
-### 2.3 可定制性设计
+## 3. 任务模型
 
 平台不绑定特定数据集或模型。所有任务采用统一的**脚本模式**：平台负责调度和存储，用户脚本负责业务逻辑。
 
-**数据入库 — 用户提供清洗脚本：**
+### 3.1 统一脚本接口
+
+所有任务共用同一个接口约定：
+
+```python
+def run(input_path: str, output_path: str, params: dict) -> dict
+```
+
+平台不区分批处理和服务，不关心脚本内部做什么。三种典型任务的 API 调用：
+
+**数据入库：**
 
 ```
 POST /api/v1/tasks
@@ -252,22 +136,7 @@ POST /api/v1/tasks
 }
 ```
 
-清洗脚本需要遵循接口约定：
-
-```python
-# mnist/mnist_clean.py
-def run(input_path: str, output_path: str, params: dict) -> dict:
-    """
-    Args:
-        input_path: 原始数据路径
-        output_path: 输出 Lance 路径
-        params: 用户自定义参数
-    Returns:
-        stats: {"total_records": 70000, ...}
-    """
-```
-
-**模型训练 — 用户提供训练脚本：**
+**模型训练：**
 
 ```
 POST /api/v1/tasks
@@ -280,22 +149,7 @@ POST /api/v1/tasks
 }
 ```
 
-训练脚本需要遵循接口约定：
-
-```python
-# mnist/mnist_cnn.py
-def run(input_path: str, output_path: str, params: dict) -> dict:
-    """
-    Args:
-        input_path: Lance 数据集路径
-        output_path: 模型输出路径
-        params: 用户定义的超参数
-    Returns:
-        metrics: {"accuracy": 0.98, "loss": 0.03, ...}
-    """
-```
-
-**推理服务 — 用户提供推理脚本：**
+**推理服务：**
 
 ```
 POST /api/v1/tasks
@@ -308,28 +162,150 @@ POST /api/v1/tasks
 }
 ```
 
-推理脚本需要遵循接口约定：
+### 3.2 任务状态机
 
-```python
-# mnist/mnist_serve.py
-def run(input_path: str, output_path: str, params: dict) -> dict:
-    """
-    Args:
-        input_path: Lance 模型文件路径
-        output_path: 未使用
-        params: 服务参数（port, device 等）
-    Returns:
-        不会正常返回（阻塞直到进程终止）
-    """
+所有任务共享同一状态机。脚本跑完就 completed，报错就 failed，cancel 就 cancelled：
+
+```
++----------+     submit    +-----------+     done      +-----------+
+| pending  | ------------> | running   | ------------> | completed |
++----------+               +-----------+               +-----------+
+                                |
+                                | error / cancel
+                                v
+                           +-----------+
+                           | failed    |
+                           +-----------+
 ```
 
-所有任务的接口完全一致：`run(input_path, output_path, params) → dict`。平台不区分批处理和服务，不关心脚本内部做什么。
+客户端通过轮询 `GET /tasks/{id}` 获取状态。
 
-## 3. Server
+### 3.3 数据入库
+
+```
++-------------+     +------------------+     +------------------+
+| Raw Data    |     | User Script      |     | Data Lake        |
+| (MNIST zip) | --> | (on Daft/Ray)    | --> | (lance_storage/  |
+|             |     |                  |     |  datasets/)      |
++-------------+     +------------------+     +------------------+
+```
+
+Server 接收任务请求，加载用户脚本并执行：
+
+```python
+# mnist/mnist_clean.py — 用户编写
+def run(input_path: str, output_path: str, params: dict) -> dict:
+    import daft
+    from daft import col
+
+    # 读取 IDX 格式的 MNIST 数据
+    df = load_mnist_idx(input_path)
+
+    # 归一化像素值到 [0, 1]
+    if params.get("normalize"):
+        df = df.with_column("image", col("image") / 255.0)
+
+    # 验证标签范围
+    df = df.where(col("label").between(0, 9))
+
+    # 添加 train/test 拆分
+    df = df.with_column("split", assign_split(col("index"), test_ratio=0.14))
+
+    # 写入数据湖
+    df.write_lance(output_path, mode="overwrite")
+
+    return {"total_records": df.count_rows()}
+```
+
+MNIST 的具体清洗步骤：
+1. 读取 IDX 格式的图像和标签文件
+2. 将 28x28 图像展平为 784 维向量，归一化到 [0, 1]
+3. 验证标签范围 [0, 9]
+4. 添加 `split` 列（train/test）
+5. 写入 Lance
+
+### 3.4 模型训练
+
+```
++------------------+     +------------------+     +------------------+
+| Data Lake        |     | User Script      |     | Data Lake        |
+| (datasets/)      | --> | (PyTorch on CPU) | --> | (models/)        |
++------------------+     +------------------+     +------------------+
+```
+
+```python
+# mnist/mnist_cnn.py — 用户编写
+def run(input_path: str, output_path: str, params: dict) -> dict:
+    import daft
+    from daft import col
+
+    # 从数据湖读取训练数据
+    df = daft.read_lance(input_path)
+    train_data = df.where(col("split") == "train").to_pandas()
+    test_data = df.where(col("split") == "test").to_pandas()
+
+    # 训练模型（PyTorch）
+    model = MnistCNN()
+    train_model(model, train_data, params)
+    metrics = evaluate_model(model, test_data)
+
+    # 将模型权重 + 元数据写入数据湖
+    save_model(model, metrics, params, output_path)
+
+    return {"accuracy": metrics["accuracy"], "loss": metrics["loss"]}
+```
+
+### 3.5 推理服务
+
+```
++------------------+     +------------------+     +------------------+
+| Data Lake        |     | User Script      |     | API / Web        |
+| (models/)        | --> | (FastAPI subprocess) | --> | (localhost:port) |
++------------------+     +------------------+     +------------------+
+```
+
+推理服务由用户脚本实现，平台只负责启动脚本。用户脚本从数据湖加载模型，启动 FastAPI 子服务：
+
+```python
+# mnist/mnist_serve.py — 用户编写
+def run(input_path: str, output_path: str, params: dict) -> dict:
+    import daft, torch, uvicorn
+    from fastapi import FastAPI
+
+    # 从数据湖读取模型权重
+    df = daft.read_lance(input_path)
+    pdf = df.to_pandas()
+    weights_bytes = pdf["weights"].iloc[0]
+
+    # 加载 PyTorch 模型
+    model = MnistCNN()
+    model.load_state_dict(torch.load(io.BytesIO(weights_bytes), weights_only=True))
+    model.eval()
+
+    # 启动 FastAPI 子服务
+    app = FastAPI()
+
+    @app.post("/predict")
+    def predict(body: PredictRequest):
+        tensor = torch.tensor(body.image).reshape(1, 1, 28, 28)
+        with torch.no_grad():
+            output = model(tensor)
+        probs = torch.softmax(output, dim=1)
+        return {
+            "prediction": probs.argmax().item(),
+            "confidence": probs.max().item(),
+            "probabilities": probs[0].tolist(),
+        }
+
+    # 阻塞运行，直到进程被 kill
+    uvicorn.run(app, host="0.0.0.0", port=params.get("port", 8080))
+```
+
+## 4. Server
 
 数据湖存储 + 脚本执行器 + API 层，统一为一个服务。
 
-### 3.1 组件职责
+### 4.1 组件职责
 
 | 组件 | 职责 |
 |------|------|
@@ -358,7 +334,7 @@ Server 内部分三个模块：
 | **TaskRunner** (`runner.py`) | 脚本执行器（加载用户脚本、调用 `run()`、管理任务生命周期） |
 | **App** (`app.py`) | FastAPI 路由（数据集、模型、任务 API） |
 
-### 3.2 RESTful API
+### 4.2 RESTful API
 
 ```
 /api/v1/
@@ -450,7 +426,7 @@ GET /api/v1/datasets
 ]
 ```
 
-### 3.3 数据湖目录结构
+### 4.3 数据湖目录结构
 
 Lance 作为统一存储格式，数据集和模型都存在数据湖中：
 
@@ -465,25 +441,7 @@ lance_storage/
     └── mnist_cnn_v2.lance       # Model versioning
 ```
 
-### 3.4 任务状态机
-
-所有任务共享同一状态机。脚本跑完就 completed，报错就 failed，cancel 就 cancelled：
-
-```
-+----------+     submit    +-----------+     done      +-----------+
-| pending  | ------------> | running   | ------------> | completed |
-+----------+               +-----------+               +-----------+
-                                |
-                                | error / cancel
-                                v
-                           +-----------+
-                           | failed    |
-                           +-----------+
-```
-
-客户端通过轮询 `GET /tasks/{id}` 获取状态。
-
-### 3.5 错误处理
+### 4.4 错误处理
 
 统一错误响应格式：
 
@@ -504,155 +462,9 @@ lance_storage/
 | 404 | TASK_NOT_FOUND | 任务不存在 |
 | 500 | INTERNAL_ERROR | 内部错误 |
 
-## 4. 解耦设计
+## 5. MNIST 实现规划
 
-平台与用户脚本通过 **Lance 格式 + run() 接口**解耦。
-
-### 4.1 脚本与平台的解耦
-
-平台不关心业务逻辑，只提供基础设施：
-
-| 平台提供的 | 用户脚本负责的 |
-|---|---|
-| 数据读写（Lance） | 清洗逻辑、特征工程 |
-| 计算资源（Daft/Ray） | 训练代码和超参数 |
-| 存储管理 | 模型版本管理策略 |
-| 任务调度和生命周期 | 推理服务和 API 设计 |
-
-用户脚本只需实现 `run(input_path, output_path, params) → dict`，平台负责调用和管理。
-
-### 4.2 可替换性
-
-- **替换存储**（如 Lance → Parquet + Milvus）：改 Storage 模块即可，用户脚本不受影响
-- **替换计算**（如 Daft → Spark）：改 TaskRunner 即可，只要脚本接口不变
-- **替换训练框架**（如 PyTorch → TensorFlow）：平台不受影响，用户脚本自行选择
-
-## 5. 核心任务流
-
-### 5.1 数据入库
-
-```
-+-------------+     +------------------+     +------------------+
-| Raw Data    |     | User Script      |     | Data Lake        |
-| (MNIST zip) | --> | (on Daft/Ray)    | --> | (lance_storage/  |
-|             |     |                  |     |  datasets/)      |
-+-------------+     +------------------+     +------------------+
-```
-
-Server 接收任务请求，加载用户脚本并执行：
-
-```python
-# mnist/mnist_clean.py — 用户编写
-def run(input_path: str, output_path: str, params: dict) -> dict:
-    import daft
-    from daft import col
-
-    # 读取 IDX 格式的 MNIST 数据
-    df = load_mnist_idx(input_path)
-
-    # 归一化像素值到 [0, 1]
-    if params.get("normalize"):
-        df = df.with_column("image", col("image") / 255.0)
-
-    # 验证标签范围
-    df = df.where(col("label").between(0, 9))
-
-    # 添加 train/test 拆分
-    df = df.with_column("split", assign_split(col("index"), test_ratio=0.14))
-
-    # 写入数据湖
-    df.write_lance(output_path, mode="overwrite")
-
-    return {"total_records": df.count_rows()}
-```
-
-MNIST 的具体清洗步骤：
-1. 读取 IDX 格式的图像和标签文件
-2. 将 28x28 图像展平为 784 维向量，归一化到 [0, 1]
-3. 验证标签范围 [0, 9]
-4. 添加 `split` 列（train/test）
-5. 写入 Lance
-
-### 5.2 模型训练
-
-```
-+------------------+     +------------------+     +------------------+
-| Data Lake        |     | User Script      |     | Data Lake        |
-| (datasets/)      | --> | (PyTorch on CPU) | --> | (models/)        |
-+------------------+     +------------------+     +------------------+
-```
-
-```python
-# mnist/mnist_cnn.py — 用户编写
-def run(input_path: str, output_path: str, params: dict) -> dict:
-    import daft
-    from daft import col
-
-    # 从数据湖读取训练数据
-    df = daft.read_lance(input_path)
-    train_data = df.where(col("split") == "train").to_pandas()
-    test_data = df.where(col("split") == "test").to_pandas()
-
-    # 训练模型（PyTorch）
-    model = MnistCNN()
-    train_model(model, train_data, params)
-    metrics = evaluate_model(model, test_data)
-
-    # 将模型权重 + 元数据写入数据湖
-    save_model(model, metrics, params, output_path)
-
-    return {"accuracy": metrics["accuracy"], "loss": metrics["loss"]}
-```
-
-### 5.3 推理服务
-
-```
-+------------------+     +------------------+     +------------------+
-| Data Lake        |     | User Script      |     | API / Web        |
-| (models/)        | --> | (FastAPI subprocess) | --> | (localhost:port) |
-+------------------+     +------------------+     +------------------+
-```
-
-推理服务由用户脚本实现，平台只负责启动脚本。用户脚本从数据湖加载模型，启动 FastAPI 子服务：
-
-```python
-# mnist/mnist_serve.py — 用户编写
-def run(input_path: str, output_path: str, params: dict) -> dict:
-    import daft, torch, uvicorn
-    from fastapi import FastAPI
-
-    # 从数据湖读取模型权重
-    df = daft.read_lance(input_path)
-    pdf = df.to_pandas()
-    weights_bytes = pdf["weights"].iloc[0]
-
-    # 加载 PyTorch 模型
-    model = MnistCNN()
-    model.load_state_dict(torch.load(io.BytesIO(weights_bytes), weights_only=True))
-    model.eval()
-
-    # 启动 FastAPI 子服务
-    app = FastAPI()
-
-    @app.post("/predict")
-    def predict(body: PredictRequest):
-        tensor = torch.tensor(body.image).reshape(1, 1, 28, 28)
-        with torch.no_grad():
-            output = model(tensor)
-        probs = torch.softmax(output, dim=1)
-        return {
-            "prediction": probs.argmax().item(),
-            "confidence": probs.max().item(),
-            "probabilities": probs[0].tolist(),
-        }
-
-    # 阻塞运行，直到进程被 kill
-    uvicorn.run(app, host="0.0.0.0", port=params.get("port", 8080))
-```
-
-## 6. MNIST 实现规划
-
-### 6.1 目录结构
+### 5.1 目录结构
 
 ```
 demo4_ai_platform/
@@ -679,7 +491,7 @@ demo4_ai_platform/
 
 > `lance_storage/` 是运行时数据，应加入 `.gitignore`。
 
-### 6.2 实现步骤
+### 5.2 实现步骤
 
 1. `server/storage.py` — Lance 读写封装（列出、查看 schema、删除）
 2. `server/runner.py` — 脚本执行器（加载用户脚本、调用 `run()`、管理任务生命周期）
@@ -690,7 +502,7 @@ demo4_ai_platform/
 7. `config.yaml` — 配置文件
 8. 单元测试
 
-### 6.3 技术选型
+### 5.3 技术选型
 
 | 需求 | 选型 | 理由 |
 |------|------|------|
@@ -700,7 +512,7 @@ demo4_ai_platform/
 | 模型训练 | PyTorch (CPU) | 轻量，MNIST 不需要 GPU |
 | API 框架 | FastAPI | 异步支持好，自动生成 OpenAPI 文档 |
 
-### 6.4 配置
+### 5.4 配置
 
 ```yaml
 # config.yaml
@@ -710,6 +522,179 @@ server:
 ```
 
 Level 1 下任务状态存储在内存中。Level 2+ 切换到 Ray 后，任务状态由 Ray Tasks/Workflows 管理。
+
+## 6. 部署级别
+
+根据负载规模，系统有三个部署级别。Server API 层不变，底层三个维度逐步升级：
+
+| 维度 | Level 1 | Level 2 | Level 3 |
+|------|---------|---------|---------|
+| **Storage** | Lance local files | Lance local files | Lance on S3/MinIO |
+| **Compute** | User Script (Daft local) | Ray Task (Daft on Ray) | Ray Task on K8s |
+| **Serving** | User Script (uvicorn) | Ray Serve | Ray Serve on K8s |
+
+### 6.1 Level 1: 单机单任务
+
+最简部署，适合开发调试和小规模数据（如 MNIST）。
+
+```
++--------------------------------------------------------------------+
+|  Single Machine                                                    |
+|                                                                    |
+|  +--------------------------------------------------------------+  |
+|  |  Server (FastAPI, :8000)                                     |  |
+|  |  +------------+  +-------------+  +-----------------------+  |  |
+|  |  | GET /data  |  | GET /models |  | POST/GET /tasks       |  |  |
+|  |  +------+-----+  +------+------+  +-----------+-----------+  |  |
+|  |         |               |                     |              |  |
+|  |         v               v                     v              |  |
+|  |  +------------+  +------------+  +------------------------+  |  |
+|  |  | Storage    |  | Storage    |  | TaskRunner             |  |  |
+|  |  | (Lance R/W)|  | (Lance R/W)|  | (thread per task)      |  |  |
+|  |  +------+-----+  +------+-----+  +-----+----------+-------+  |  |
+|  |         |               |              |          |          |  |
+|  +--------------------------------------------------------------+  |
+|            |               |              |          |             |
+|            v               v              v          v             |
+|  +-----------------------------+  +------------+ +------------+    |
+|  |  lance_storage/             |  | User       | | User       |    |
+|  |  +----------+ +---------+   |  | Script     | | Script     |    |
+|  |  | datasets/| | models/ |   |  | (Daft      | | (uvicorn   |    |
+|  |  | *.lance  | | *.lance |   |  |  local)    | |  :8080)    |    |
+|  |  +----------+ +---------+   |  |            | |            |    |
+|  +-----------------------------+  +------------+ +------------+    |
+|   Storage                          Compute        Serving          |
++--------------------------------------------------------------------+
+```
+
+- 任务串行执行，每个任务在独立线程中运行用户脚本
+- 推理服务由用户脚本自行启动 FastAPI 子进程（如 :8080）
+- 依赖：不需要 Ray，不需要 K8s
+
+### 6.2 Level 2: 单机多任务
+
+引入 Ray 作为本地运行时，支持并发任务和资源隔离。
+
+```
++--------------------------------------------------------------------+
+|  Single Machine                                                    |
+|                                                                    |
+|  +--------------------------------------------------------------+  |
+|  |  Server (FastAPI, :8000)                                     |  |
+|  |  +------------+  +-------------+  +-----------------------+  |  |
+|  |  | GET /data  |  | GET /models |  | POST/GET /tasks       |  |  |
+|  |  +------+-----+  +------+------+  +-----------+-----------+  |  |
+|  |         |               |                     |              |  |
+|  |         v               v                     v              |  |
+|  |  +------------+  +------------+  +------------------------+  |  |
+|  |  | Storage    |  | Storage    |  | TaskRunner             |  |  |
+|  |  | (Lance R/W)|  | (Lance R/W)|  | (submit to Ray)        |  |  |
+|  |  +------+-----+  +------+-----+  +-----+----------+-------+  |  |
+|  |         |               |              |          |          |  |
+|  +--------------------------------------------------------------+  |
+|            |               |              |          |             |
+|            v               v              v          v             |
+|  +-----------------------------+  +------------------------+       |
+|  |  lance_storage/             |  | Ray (local cluster)    |       |
+|  |  +----------+ +---------+   |  | +----------+ +-------+ |       |
+|  |  | datasets/| | models/ |   |  | | Ray Task | | Ray   | |       |
+|  |  | *.lance  | | *.lance |   |  | | (Daft    | | Serve | |       |
+|  |  +----------+ +---------+   |  | |  on Ray) | |       | |       |
+|  +-----------------------------+  | +----------+ +-------+ |       |
+|                                   +------------------------+       |
+|   Storage                            Compute      Serving          |
++--------------------------------------------------------------------+
+```
+
+- Daft 切换 Ray runner（`set_runner_ray()`），多任务并发
+- Ray Serve 管理模型副本，支持多模型同时服务
+- 依赖：需要 Ray，不需要 K8s
+
+**Level 1 → 2 的改动点：**
+
+| 维度 | 改动 |
+|------|------|
+| Compute | User Script → Ray Task |
+| Serving | User Script → Ray Serve |
+| Storage | 不变 |
+
+**TaskRunner 改动示例：**
+
+Level 1 在线程中直接调用用户脚本：
+
+```python
+# Level 1: runner.py — 线程执行
+def _execute(self, task_id, script, input_path, output_path, params):
+    fn = _load_run_function(script)
+    result = fn(input_path, output_path, params)
+    self._tasks[task_id]["status"] = "completed"
+    self._tasks[task_id]["result"] = result
+```
+
+Level 2 改为提交 Ray Task，Daft 计算也自动分布到 Ray 集群：
+
+```python
+# Level 2: runner.py — Ray Task 执行
+@ray.remote
+def _run_script(script: str, input_path: str, output_path: str, params: dict) -> dict:
+    daft.context.set_runner_ray()
+    fn = _load_run_function(script)
+    return fn(input_path, output_path, params)
+
+def _execute(self, task_id, script, input_path, output_path, params):
+    ref = _run_script.remote(script, input_path, output_path, params)
+    result = ray.get(ref)
+    self._tasks[task_id]["status"] = "completed"
+    self._tasks[task_id]["result"] = result
+```
+
+### 6.3 Level 3: 多机多任务
+
+Ray 集群部署在 K8s 上，存储切换到共享对象存储。
+
+```
++--------------------------------------------------------------------+
+|  K8s Cluster                                                       |
+|                                                                    |
+|  +--------------------------------------------------------------+  |
+|  |  Server Pod (FastAPI, :8000)                                 |  |
+|  |  +------------+  +-------------+  +-----------------------+  |  |
+|  |  | GET /data  |  | GET /models |  | POST/GET /tasks       |  |  |
+|  |  +------+-----+  +------+------+  +-----------+-----------+  |  |
+|  |         |               |                     |              |  |
+|  |         v               v                     v              |  |
+|  |  +------------+  +------------+  +------------------------+  |  |
+|  |  | Storage    |  | Storage    |  | TaskRunner             |  |  |
+|  |  | (Lance R/W)|  | (Lance R/W)|  | (Ray Workflows)        |  |  |
+|  |  +------+-----+  +------+-----+  +-----+----------+-------+  |  |
+|  |         |               |              |          |          |  |
+|  +--------------------------------------------------------------+  |
+|            |               |              |          |             |
+|            v               v              v          v             |
+|  +-----------------------------+  +------------------------+       |
+|  |  S3 / MinIO (shared)        |  | Ray on K8s (KubeRay)   |       |
+|  |  s3://bucket/lance_storage/ |  | +----------+ +-------+ |       |
+|  |  +----------+ +---------+   |  | | Ray Task | | Ray   | |       |
+|  |  | datasets/| | models/ |   |  | | (Daft    | | Serve | |       |
+|  |  | *.lance  | | *.lance |   |  | |  on Ray) | | on K8s| |       |
+|  |  +----------+ +---------+   |  | +----------+ +-------+ |       |
+|  +-----------------------------+  +------------------------+       |
+|   Storage                            Compute      Serving          |
++--------------------------------------------------------------------+
+```
+
+- Ray on K8s 自动扩缩容，多节点并行
+- Ray Workflows 持久化任务状态，支持故障恢复
+- Lance 文件在 S3/MinIO 上，多节点共享
+- 依赖：需要 Ray、K8s、MinIO/S3
+
+**Level 2 → 3 的改动点：**
+
+| 维度 | 改动 |
+|------|------|
+| Compute | Ray Task → Ray Task on K8s |
+| Serving | Ray Serve → Ray Serve on K8s |
+| Storage | `./lance_storage/` → `s3://bucket/lance_storage/` |
 
 ## 参考文献
 
