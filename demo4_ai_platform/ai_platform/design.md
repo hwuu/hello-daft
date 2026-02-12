@@ -712,7 +712,8 @@ demo4_ai_platform/
 ├── README.md                    # 教学入口
 ├── requirements.txt
 ├── notebooks/                   # 教学 notebook
-│   └── 01_level1_tutorial.ipynb
+│   ├── 01_level1_tutorial.ipynb
+│   └── 02_level2_ray.ipynb
 ├── ai_platform/                 # 平台源码
 │   ├── design.md               # 本文档
 │   ├── server/

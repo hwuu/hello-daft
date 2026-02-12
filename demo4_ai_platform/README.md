@@ -29,6 +29,7 @@ jupyter notebook notebooks/01_level1_tutorial.ipynb
 | 内容 | 说明 |
 |------|------|
 | [Level 1 教程](notebooks/01_level1_tutorial.ipynb) | 端到端演示：数据入库 → 训练 → 推理 → 可视化 |
+| [Level 2 教程](notebooks/02_level2_ray.ipynb) | Ray 并发任务：多超参数同时训练 |
 | [Web Demo](mnist/index.html) | 手写数字识别页面（Canvas 手写 + API 调用） |
 | [设计文档](ai_platform/design.md) | 架构设计、设计决策、API 定义、部署级别 |
 
@@ -52,7 +53,8 @@ demo4_ai_platform/
 ├── README.md                    # 教学入口
 ├── requirements.txt
 ├── notebooks/                   # 教学 notebook
-│   └── 01_level1_tutorial.ipynb
+│   ├── 01_level1_tutorial.ipynb
+│   └── 02_level2_ray.ipynb
 ├── ai_platform/                 # 平台源码
 │   ├── design.md               # 设计文档
 │   ├── server/                 # Server 服务
