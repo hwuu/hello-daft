@@ -7,10 +7,10 @@ import pyarrow as pa
 import pytest
 from fastapi.testclient import TestClient
 
-from ai_platform.server.app import create_app
-from ai_platform.server.runner import _load_run_function
-from ai_platform.server.runners.local import LocalRunner
-from ai_platform.server.storage import Storage
+from ai_platform.app import create_app
+from ai_platform.runner import _load_run_function
+from ai_platform.runners.local import LocalRunner
+from ai_platform.storage import Storage
 
 
 # --- Fixtures ---
@@ -25,7 +25,7 @@ def tmp_storage(tmp_path):
 @pytest.fixture
 def sample_dataset(tmp_path):
     """Create a small Lance dataset for testing."""
-    storage_path = tmp_path / "lance_storage"
+    storage_path = tmp_path / ".ai_platform"
     datasets_path = storage_path / "datasets"
     datasets_path.mkdir(parents=True)
 
@@ -255,7 +255,7 @@ class TestAPI:
         resp = client.post("/api/v1/tasks", json={
             "name": "mnist_serve",
             "script": sample_script,
-            "input": "lance_storage/models/mnist_cnn_v1.lance",
+            "input": ".ai_platform/models/mnist_cnn_v1.lance",
             "output": "",
             "params": {"device": "cpu", "port": 8080},
         })

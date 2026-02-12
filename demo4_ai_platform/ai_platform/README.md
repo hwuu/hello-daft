@@ -341,7 +341,7 @@ Server 内部分三个模块：
 Lance 作为统一存储格式，数据集和模型都存在数据湖中：
 
 ```
-lance_storage/
+.ai_platform/
 ├── datasets/
 │   ├── mnist_raw.lance          # Raw data (images + labels)
 │   ├── mnist_clean.lance        # Cleaned data
@@ -406,7 +406,7 @@ lance_storage/
 |            |               |              |          |             |
 |            v               v              v          v             |
 |  +-----------------------------+  +------------+ +------------+    |
-|  |  lance_storage/             |  | User       | | User       |    |
+|  |  .ai_platform/              |  | User       | | User       |    |
 |  |  +----------+ +---------+   |  | Script     | | Script     |    |
 |  |  | datasets/| | models/ |   |  | (Daft      | | (uvicorn   |    |
 |  |  | *.lance  | | *.lance |   |  |  local)    | |  :8080)    |    |
@@ -444,7 +444,7 @@ lance_storage/
 |            |               |              |          |             |
 |            v               v              v          v             |
 |  +-----------------------------+  +------------------------+       |
-|  |  lance_storage/             |  | Ray (local cluster)    |       |
+|  |  .ai_platform/              |  | Ray (local cluster)    |       |
 |  |  +----------+ +---------+   |  | +----------+ +-------+ |       |
 |  |  | datasets/| | models/ |   |  | | Ray Task | | Ray   | |       |
 |  |  | *.lance  | | *.lance |   |  | | (Daft    | | Serve | |       |
@@ -574,7 +574,7 @@ Ray 集群部署在 K8s 上，存储切换到共享对象存储。
 |            v               v              v          v             |
 |  +-----------------------------+  +------------------------+       |
 |  |  S3 / MinIO (shared)        |  | Ray on K8s (KubeRay)   |       |
-|  |  s3://bucket/lance_storage/ |  | +----------+ +-------+ |       |
+|  |  s3://bucket/ai_platform/   |  | +----------+ +-------+ |       |
 |  |  +----------+ +---------+   |  | | Ray Task | | Ray   | |       |
 |  |  | datasets/| | models/ |   |  | | (Daft    | | Serve | |       |
 |  |  | *.lance  | | *.lance |   |  | |  on Ray) | | on K8s| |       |
@@ -595,7 +595,7 @@ Ray 集群部署在 K8s 上，存储切换到共享对象存储。
 |------|------|
 | Compute | Ray Task → Ray Task on K8s |
 | Serving | Ray Serve → Ray Serve on K8s |
-| Storage | `./lance_storage/` → `s3://bucket/lance_storage/` |
+| Storage | `./.ai_platform/` → `s3://bucket/ai_platform/` |
 
 ### 7.4 Ray on K8s 的能力边界
 
@@ -715,27 +715,27 @@ demo4_ai_platform/
 │   ├── 01_level1_tutorial.ipynb
 │   └── 02_level2_ray.ipynb
 ├── ai_platform/                 # 平台源码
-│   ├── design.md               # 本文档
-│   ├── server/
-│   │   ├── __init__.py
-│   │   ├── app.py              # FastAPI 主应用（API 路由）
-│   │   ├── storage.py          # Lance 读写封装
-│   │   ├── runner.py           # Runner 基类 + 工厂函数
-│   │   └── runners/
-│   │       ├── local.py        # Level 1: 线程执行
-│   │       └── ray.py          # Level 2/3: Ray Task 执行
-│   └── tests/unit/             # 单元测试
+│   ├── README.md               # 本文档
+│   ├── app.py                  # FastAPI 主应用（API 路由）
+│   ├── storage.py              # Lance 读写封装
+│   ├── runner.py               # Runner 基类 + 工厂函数
+│   ├── runners/
+│   │   ├── local.py            # Level 1: 线程执行
+│   │   └── ray.py              # Level 2/3: Ray Task 执行
+│   └── tests/                  # 单元测试
 ├── mnist/                       # 用户脚本 + Web Demo（平台用户编写）
 │   ├── mnist_clean.py          # MNIST 清洗脚本
 │   ├── mnist_cnn.py            # MNIST CNN 训练脚本
+│   ├── mnist_e2e.py            # 端到端流式处理（Level 2）
 │   ├── mnist_serve.py          # MNIST 推理服务脚本
 │   └── index.html              # 手写数字识别 Web Demo
-└── lance_storage/               # 运行时数据（gitignored）
+└── .ai_platform/                # 运行时数据（gitignored）
+    ├── download/
     ├── datasets/
     └── models/
 ```
 
-> `lance_storage/` 是运行时数据，应加入 `.gitignore`。
+> `.ai_platform/` 是运行时数据，应加入 `.gitignore`。
 
 ### 技术选型
 

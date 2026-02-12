@@ -33,6 +33,7 @@ def run(input_path: str, output_path: str, params: dict) -> dict:
 
     # 如果指定 "download" 或目录不存在，自动下载 MNIST 数据
     if input_path == "download" or not input_dir.exists():
+        input_dir = Path(".ai_platform/download")
         logger.info(f"数据目录不存在，开始下载 MNIST 数据到: {input_dir}")
         input_dir = _download_mnist(input_dir)
 

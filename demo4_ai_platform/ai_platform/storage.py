@@ -3,7 +3,7 @@ Lance 存储操作模块。
 
 封装数据湖中数据集和模型的增删查操作。
 数据湖目录结构：
-    lance_storage/
+    .ai_platform/
     ├── datasets/    # 数据集（如 mnist_clean.lance）
     └── models/      # 模型（如 mnist_cnn_v1.lance）
 """
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class Storage:
     """Lance 数据湖存储管理器。
 
-    负责扫描 lance_storage/ 目录下的 .lance 文件，
+    负责扫描 .ai_platform/ 目录下的 .lance 文件，
     提供列出、查看详情、删除等操作。
     """
 

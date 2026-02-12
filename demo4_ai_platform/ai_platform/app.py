@@ -5,7 +5,7 @@ AI Platform HTTP API 模块。
 用户唯一入口。
 
 启动方式:
-    uvicorn ai_platform.server.app:app --port 8000
+    uvicorn ai_platform.app:app --port 8000
 """
 
 import logging
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _storage: Storage | None = None
 _runner: BaseRunner | None = None
 
-DEFAULT_STORAGE_PATH = "./lance_storage"
+DEFAULT_STORAGE_PATH = "./.ai_platform"
 
 # Level 1: local (线程执行), Level 2/3: ray (Ray Task 执行)
 _LEVEL_TO_BACKEND = {"1": "local", "2": "ray", "3": "ray"}
@@ -35,7 +35,7 @@ def create_app(storage_path: str | None = None, backend: str | None = None) -> F
     """创建 AI Platform FastAPI 应用。
 
     Args:
-        storage_path: 数据湖根目录路径（默认 ./lance_storage）
+        storage_path: 数据湖根目录路径（默认 ./.ai_platform）
         backend: Runner 后端（"local" 或 "ray"），为 None 时从 PLATFORM_LEVEL 环境变量读取
     """
 

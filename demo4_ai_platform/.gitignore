@@ -1,8 +1,5 @@
-# 数据湖（运行时数据）
-lance_storage/
-
-# MNIST 原始数据（下载缓存）
-download/
+# 运行时数据（下载缓存、数据湖）
+.ai_platform/
 
 # Python
 __pycache__/
