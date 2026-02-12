@@ -7,10 +7,10 @@ import pyarrow as pa
 import pytest
 from fastapi.testclient import TestClient
 
-from server.app import create_app
-from server.runner import _load_run_function
-from server.runners.local import LocalRunner
-from server.storage import Storage
+from ai_platform.server.app import create_app
+from ai_platform.server.runner import _load_run_function
+from ai_platform.server.runners.local import LocalRunner
+from ai_platform.server.storage import Storage
 
 
 # --- Fixtures ---

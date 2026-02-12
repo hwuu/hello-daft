@@ -5,7 +5,7 @@ AI Platform HTTP API 模块。
 用户唯一入口。
 
 启动方式:
-    uvicorn server.app:app --port 8000
+    uvicorn ai_platform.server.app:app --port 8000
 """
 
 import logging
