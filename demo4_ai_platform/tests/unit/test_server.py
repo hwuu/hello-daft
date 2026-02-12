@@ -8,7 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app import create_app
-from server.runner import TaskRunner, _load_run_function
+from server.runner import _load_run_function
+from server.runners.local import LocalRunner
 from server.storage import Storage
 
 
@@ -137,7 +138,7 @@ class TestRunner:
             _load_run_function(str(script))
 
     def test_submit_and_complete(self, sample_script):
-        runner = TaskRunner()
+        runner = LocalRunner()
         result = runner.submit("test", sample_script, "/in", "/out", {"a": 1})
         assert "id" in result
         assert result["name"] == "test"
@@ -150,7 +151,7 @@ class TestRunner:
         assert task["result"]["status"] == "ok"
 
     def test_submit_failing_script(self, failing_script):
-        runner = TaskRunner()
+        runner = LocalRunner()
         result = runner.submit("fail_test", failing_script, "/in", "/out", {})
         time.sleep(0.5)
         task = runner.get(result["id"])
@@ -158,22 +159,22 @@ class TestRunner:
         assert "intentional error" in task["error"]
 
     def test_list_tasks(self, sample_script):
-        runner = TaskRunner()
+        runner = LocalRunner()
         runner.submit("test", sample_script, "/in", "/out", {})
         tasks = runner.list_all()
         assert len(tasks) == 1
         assert tasks[0]["name"] == "test"
 
     def test_get_nonexistent(self):
-        runner = TaskRunner()
+        runner = LocalRunner()
         assert runner.get("nonexistent") is None
 
     def test_cancel_nonexistent(self):
-        runner = TaskRunner()
+        runner = LocalRunner()
         assert runner.cancel("nonexistent") is False
 
     def test_cancel_running_task(self, slow_script):
-        runner = TaskRunner()
+        runner = LocalRunner()
         result = runner.submit("slow", slow_script, "/in", "/out", {})
         task_id = result["id"]
         assert result["status"] == "running"
@@ -184,24 +185,24 @@ class TestRunner:
         assert task["error"] == "cancelled"
 
     def test_cancel_completed_task_returns_false(self, sample_script):
-        runner = TaskRunner()
+        runner = LocalRunner()
         result = runner.submit("test", sample_script, "/in", "/out", {})
         time.sleep(0.5)
         assert runner.cancel(result["id"]) is False
 
     def test_public_view_hides_none_fields(self, sample_script):
-        runner = TaskRunner()
+        runner = LocalRunner()
         result = runner.submit("test", sample_script, "/in", "/out", {})
         for value in result.values():
             assert value is not None
 
     def test_public_view_hides_script_field(self, sample_script):
-        runner = TaskRunner()
+        runner = LocalRunner()
         result = runner.submit("test", sample_script, "/in", "/out", {})
         assert "script" not in result
 
     def test_no_type_field_in_response(self, sample_script):
-        runner = TaskRunner()
+        runner = LocalRunner()
         result = runner.submit("test", sample_script, "/in", "/out", {})
         assert "type" not in result
 

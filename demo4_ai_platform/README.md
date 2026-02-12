@@ -60,6 +60,9 @@ demo4_ai_platform/
 ├── server/                      # AI Platform 服务
 │   ├── app.py                   # HTTP API
 │   ├── storage.py               # Lance 存储封装
-│   └── runner.py                # 脚本执行器
+│   ├── runner.py                # Runner 基类 + 工厂函数
+│   └── runners/
+│       ├── local.py             # Level 1: 线程执行
+│       └── ray.py               # Level 2/3: Ray Task 执行
 └── tests/unit/                  # 单元测试
 ```

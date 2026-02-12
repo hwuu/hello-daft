@@ -108,7 +108,7 @@
 #### 可替换性
 
 - **替换存储**（如 Lance → Parquet + Milvus）：改 Storage 模块即可，用户脚本不受影响
-- **替换计算**（如 Daft → Spark）：改 TaskRunner 即可，只要脚本接口不变
+- **替换计算**（如 Daft → Spark）：改 Runner 后端即可，只要脚本接口不变
 - **替换训练框架**（如 PyTorch → TensorFlow）：平台不受影响，用户脚本自行选择
 
 ## 3. 任务模型
@@ -333,8 +333,8 @@ Server 内部分三个模块：
 | 模块 | 职责 |
 |------|------|
 | **Storage** (`storage.py`) | Lance 读写封装（列出、查看 schema、删除） |
-| **TaskRunner** (`runner.py`) | 脚本执行器（加载用户脚本、调用 `run()`、管理任务生命周期） |
-| **App** (`app.py`) | FastAPI 路由（数据集、模型、任务 API） |
+| **Runner** (`runner.py` + `runners/`) | 脚本执行器基类 + 后端实现（`local.py` 线程执行，`ray.py` Ray Task 执行） |
+| **App** (`app.py`) | FastAPI 路由（数据集、模型、任务 API），通过 `PLATFORM_LEVEL` 环境变量选择后端 |
 
 ### 4.2 RESTful API
 
@@ -480,7 +480,10 @@ demo4_ai_platform/
 │   ├── __init__.py
 │   ├── app.py                   # FastAPI 主应用（API 路由）
 │   ├── storage.py               # Lance 读写封装
-│   └── runner.py                # 脚本执行器（加载脚本、调用 run()）
+│   ├── runner.py                # Runner 基类 + 工厂函数
+│   └── runners/
+│       ├── local.py             # Level 1: 线程执行
+│       └── ray.py               # Level 2/3: Ray Task 执行
 ├── mnist/                       # 用户脚本 + Web Demo
 │   ├── mnist_clean.py           # MNIST 清洗脚本
 │   ├── mnist_cnn.py             # MNIST CNN 训练脚本

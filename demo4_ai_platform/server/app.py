@@ -9,29 +9,34 @@ AI Platform HTTP API 模块。
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .runner import TaskRunner
+from .runner import BaseRunner, create_runner
 from .storage import Storage
 
 logger = logging.getLogger(__name__)
 
 # 模块级变量，在 lifespan 中初始化
 _storage: Storage | None = None
-_runner: TaskRunner | None = None
+_runner: BaseRunner | None = None
 
 DEFAULT_STORAGE_PATH = "./lance_storage"
 
+# Level 1: local (线程执行), Level 2/3: ray (Ray Task 执行)
+_LEVEL_TO_BACKEND = {"1": "local", "2": "ray", "3": "ray"}
 
-def create_app(storage_path: str | None = None) -> FastAPI:
+
+def create_app(storage_path: str | None = None, backend: str | None = None) -> FastAPI:
     """创建 AI Platform FastAPI 应用。
 
     Args:
         storage_path: 数据湖根目录路径（默认 ./lance_storage）
+        backend: Runner 后端（"local" 或 "ray"），为 None 时从 PLATFORM_LEVEL 环境变量读取
     """
 
     @asynccontextmanager
@@ -40,8 +45,10 @@ def create_app(storage_path: str | None = None) -> FastAPI:
         global _storage, _runner
         path = storage_path or DEFAULT_STORAGE_PATH
         _storage = Storage(path)
-        _runner = TaskRunner()
-        logger.info(f"AI Platform 启动完成，存储路径: {path}")
+        level = os.environ.get("PLATFORM_LEVEL", "1")
+        resolved_backend = backend or _LEVEL_TO_BACKEND.get(level, "local")
+        _runner = create_runner(resolved_backend)
+        logger.info(f"AI Platform 启动完成，存储路径: {path}, 后端: {resolved_backend}")
         yield
         logger.info("AI Platform 关闭")
 
