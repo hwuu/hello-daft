@@ -507,47 +507,48 @@ POST /tasks  {script: "mnist_clean.py", output: "mnist_clean.lance"}
 POST /tasks  {script: "mnist_cnn.py", input: "mnist_clean.lance", ...}
 ```
 
-Level 2 下，用户可以编写端到端脚本，在同一个 Daft on Ray 执行图里完成清洗和训练，中间数据在内存中流转不落盘：
+Level 2 下，用户可以编写端到端脚本 `mnist_e2e.py`，通过嵌套 Ray Task 实现流式处理和资源分步：
 
 ```python
-# mnist/mnist_e2e.py — 端到端流式处理（Level 2）
-def run(input_path: str, output_path: str, params: dict) -> dict:
-    import daft
-    from daft import col
+# mnist/mnist_e2e.py — 嵌套 Ray Task，每个 step 独立声明资源
 
-    # 阶段 1: 数据清洗（CPU）
-    # Daft lazy evaluation，此时只构建计算图，不执行
-    df = load_mnist_idx(input_path)
-    if params.get("normalize"):
-        df = df.with_column("image", col("image") / 255.0)
-    df = df.where(col("label").between(0, 9))
+@ray.remote(num_cpus=2)
+def clean_step(input_path: str) -> dict:
+    """阶段 1: 数据清洗（轻量 CPU）"""
+    df = daft.read_lance(input_path)
+    train_pdf = df.where(col("split") == "train").to_pandas()
+    test_pdf = df.where(col("split") == "test").to_pandas()
+    return {"train": train_pdf.to_dict("list"), "test": test_pdf.to_dict("list")}
 
-    # 阶段 2: 训练（GPU）
-    # .to_pandas() 触发执行，数据在 Ray 集群内存中流转
-    # 清洗结果不写 Lance，直接进训练
-    train_data = df.where(col("split") == "train").to_pandas()
-    test_data = df.where(col("split") == "test").to_pandas()
-
+@ray.remote(num_cpus=4)  # 如果有 GPU: train_step.options(num_gpus=1).remote(...)
+def train_step(clean_data: dict, output_path: str, params: dict) -> dict:
+    """阶段 2: 模型训练（重量 CPU，可选 GPU）"""
     model = MnistCNN()
-    train_model(model, train_data, params)
-    metrics = evaluate_model(model, test_data)
+    # ... 训练 ...
+    save_model(model, output_path, params, metrics)
+    return {"accuracy": metrics["accuracy"]}
 
-    # 只有最终结果写 Lance
-    save_model(model, metrics, params, output_path)
-
-    return {"accuracy": metrics["accuracy"], "loss": metrics["loss"]}
+def run(input_path, output_path, params):
+    # run() 是轻量协调者，不做计算
+    clean_ref = clean_step.remote(input_path)
+    # clean_ref 作为依赖传入，Ray 自动等 clean_step 完成后再调度 train_step
+    train_ref = train_step.remote(clean_ref, output_path, params)
+    return ray.get(train_ref)
 ```
+
+关键点：每个 step 是独立的 Ray Task，清洗用 2 CPU，训练用 4 CPU（可加 GPU）。清洗完释放资源，训练时再申请。中间数据通过 Ray 对象存储传递，不写 Lance。
 
 两种方式对比：
 
-| | 分开两个 Task | 单个 e2e 脚本 |
+| | 分开两个 Task | 嵌套 Ray Task (e2e) |
 |---|---|---|
-| 中间数据 | 写 Lance 文件 | 内存中流转 |
-| 调度 | 两次 HTTP 调用 | 一次 |
+| 中间数据 | 写 Lance 文件 | Ray 对象存储，内存中流转 |
+| 资源 | 每个 Task 一套 | 每个 step 独立声明 |
+| GPU 占用 | 清洗 Task 不需要 GPU | 只有 train_step 申请 GPU |
+| 调度 | 两次 HTTP 调用 | 一次，内部 Ray 自动编排 |
 | 灵活性 | 可单独重跑清洗或训练 | 必须一起跑 |
-| 适用场景 | 开发调试、数据复用 | 生产跑批、追求性能 |
 
-平台 API 不变，流式编排由用户脚本自己实现。Daft on Ray 的优势（内存流式、异构调度）在用户脚本内部自然生效。
+平台 API 不变，流式编排和资源分步由用户脚本自己实现。平台只负责调用 `run()`，不感知内部的 Ray Task 嵌套。
 
 ### 7.3 Level 3: 多机多任务
 
